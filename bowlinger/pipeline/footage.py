@@ -28,7 +28,7 @@ from bowlinger.pipeline.yolo_model import YoloDetector
 
 # Release is a fraction of a second after the bowler's fastest approach,
 # which is the visible stride rather than a resolved ball leaving the hand.
-RELEASE_AFTER_STRIDE_S = 0.45
+RELEASE_AFTER_STRIDE_S = 0.25
 
 
 def footage_texture(path: Path) -> float:
@@ -65,8 +65,7 @@ def _motion_series(path: Path, settings: Settings):
     height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
     grays: list[np.ndarray] = []
     boxes_at: dict[int, dict[str, list[tuple[float, float, float, float]]]] = {}
-    dedicated_batsman = detector.spec.class_id("batsman") is not None
-    dedicated_bowler = detector.spec.class_id("bowler") is not None
+    role_points: dict[str, list[dict]] = {"ball": [], "bat": [], "stumps": []}
     index = 0
     while True:
         ok, frame = capture.read()
@@ -75,14 +74,26 @@ def _motion_series(path: Path, settings: Settings):
         grays.append(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
         if index % 2 == 0:
             grouped = detector.detect(frame)
+            # Even a dedicated batsman class can also fire on the bowler. Keep the
+            # small figure at the far crease, and the large figure at the near end.
             people = _boxes(grouped.get("person", []))
-            strikers = _boxes(grouped.get("batsman", [])) if dedicated_batsman else [
-                box for box in people if _is_striker(box, width, height)
-            ]
-            bowlers = _boxes(grouped.get("bowler", [])) if dedicated_bowler else [
-                box for box in people if _is_bowler(box, height)
-            ]
+            striker_pool = _boxes(grouped.get("batsman", [])) + people
+            bowler_pool = _boxes(grouped.get("bowler", [])) + people
+            strikers = [box for box in striker_pool if _is_striker(box, width, height)]
+            bowlers = [box for box in bowler_pool if _is_bowler(box, height)]
             boxes_at[index] = {"striker": strikers, "bowler": bowlers}
+            for role in ("ball", "bat", "stumps"):
+                for box in _boxes(grouped.get(role, [])):
+                    role_points[role].append(
+                        {
+                            "frame": index,
+                            "x": (box[0] + box[2]) / 2,
+                            "y": (box[1] + box[3]) / 2,
+                            "w": box[2] - box[0],
+                            "h": box[3] - box[1],
+                            "box": box,
+                        }
+                    )
         index += 1
     capture.release()
 
@@ -100,7 +111,8 @@ def _motion_series(path: Path, settings: Settings):
                 anchor = (last_striker[0] + last_striker[2]) / 2
                 chosen = min(strikers, key=lambda box: abs((box[0] + box[2]) / 2 - anchor))
             else:
-                chosen = max(strikers, key=lambda box: box[3] - box[1])
+                # The striker is the smaller of the crease figures, not the bowler.
+                chosen = min(strikers, key=lambda box: box[3] - box[1])
             # Ignore a person who has walked into the shot far from the crease.
             if last_striker is not None:
                 jump = abs((chosen[0] + chosen[2]) / 2 - (last_striker[0] + last_striker[2]) / 2)
@@ -130,7 +142,7 @@ def _motion_series(path: Path, settings: Settings):
                 ) ** 0.5
                 bowler_speed.append((frame_index / fps, speed))
             last_bowler = bowlers[0] if last_bowler is None else bowler
-    return fps, width, height, index, striker_motion, bowler_speed, striker_boxes, grays
+    return fps, width, height, index, striker_motion, bowler_speed, striker_boxes, grays, role_points, detector.spec
 
 
 def _local_peaks(series: list[tuple[float, float]], gap_s: float, percentile: float) -> list[tuple[float, float]]:
@@ -173,20 +185,26 @@ def _contacts(motion, bowler_peaks, onsets) -> list[dict]:
     values = np.array([item[1] for item in motion]) if motion else np.array([])
     ratios = {round(item[0], 2): item[2] for item in motion}
     candidates: list[tuple[float, str, float]] = []
+    motion_peaks = _local_peaks([(item[0], item[1]) for item in motion], 2.0, 88)
+    # A real run-up moves the bowler a long way. Walking past the camera does not.
+    strides = [(peak, speed) for peak, speed in bowler_peaks if speed >= 30]
+    # One fast person in frame is not a bowler who delivers every ball.
+    gate_on_stride = len(strides) >= 3
     for onset in onsets:
-        if onset < 1.5 or times.size == 0:
+        if onset < 3.0 or times.size == 0:
             continue
-        nearby = values[np.abs(times - onset) < 0.4]
-        if nearby.size and float(nearby.max()) >= 3.2 and onset > 1.5:
-            # Strength is encoded by the caller via which onsets it passes.
-            candidates.append((float(onset), "audio", float(nearby.max())))
-    motion_peaks = _local_peaks([(item[0], item[1]) for item in motion], 2.2, 94)
-    for time_s in _keep_isolated_peaks(motion_peaks):
-        value = next(item[1] for item in motion_peaks if abs(item[0] - time_s) < 0.05)
-        candidates.append((time_s, "motion", value))
+        nearby = values[np.abs(times - onset) < 0.45]
+        if not nearby.size or float(nearby.max()) < 3.2:
+            continue
+        if gate_on_stride and not any(abs(onset - peak) < 2.2 for peak, _speed in strides):
+            continue
+        candidates.append((float(onset), "audio", float(nearby.max())))
     for time_s, value in motion_peaks:
-        if any(0.15 <= time_s - peak <= 1.6 for peak, _speed in bowler_peaks):
+        if any(0.05 <= time_s - peak <= 1.8 for peak, _speed in strides):
             candidates.append((time_s, "stride", value))
+        elif value >= 7.5 or (not gate_on_stride and value >= 5.0):
+            # A sharp isolated swing still counts when the bowler is out of frame.
+            candidates.append((time_s, "motion", value))
     candidates.sort()
     merged: list[tuple[float, str, float]] = []
     for time_s, source, score in candidates:
@@ -201,7 +219,7 @@ def _contacts(motion, bowler_peaks, onsets) -> list[dict]:
         merged.append((time_s, source, score))
     shots = []
     for time_s, source, score in merged:
-        if time_s < 1.5:
+        if time_s < 3.0:
             continue
         ratio = ratios.get(round(time_s, 2), 0.0)
         # nearest ratio sample
@@ -273,6 +291,59 @@ def _ball_track(grays, fps, contact_s, striker_box, width, height) -> list[dict]
     return points
 
 
+def _window(points: list[dict], fps: float, time_s: float, before: float, after: float) -> list[dict]:
+    start = (time_s - before) * fps
+    end = (time_s + after) * fps
+    return [point for point in points if start <= point["frame"] <= end]
+
+
+def _bat_near(points: list[dict], fps: float, time_s: float, box) -> bool:
+    if box is None:
+        return False
+    center_x = (box[0] + box[2]) / 2
+    center_y = (box[1] + box[3]) / 2
+    return any((point["x"] - center_x) ** 2 + (point["y"] - center_y) ** 2 < 160**2 for point in _window(points, fps, time_s, 0.45, 0.45))
+
+
+def _shot_from_bat(points: list[dict], fps: float, time_s: float, box) -> str | None:
+    """Rough shot from how the bat moves around the striker. None if the bat is not seen."""
+    seen = _window(points, fps, time_s, 0.15, 0.35)
+    if len(seen) < 2:
+        return None
+    seen.sort(key=lambda point: point["frame"])
+    dx = seen[-1]["x"] - seen[0]["x"]
+    dy = seen[-1]["y"] - seen[0]["y"]
+    if abs(dx) < 14 and abs(dy) < 14:
+        return "defence"
+    if abs(dx) > max(18, abs(dy) * 1.15):
+        return "pull"
+    return "drive"
+
+
+def _ball_from_model(points: list[dict], fps: float, time_s: float, box) -> list[dict]:
+    window = _window(points, fps, time_s, 0.9, 0.2)
+    if len(window) < 4:
+        return []
+    window.sort(key=lambda point: point["frame"])
+    return [{"frame": point["frame"], "x": point["x"], "y": point["y"], "predicted": False} for point in window]
+
+
+def _stumps_from_model(points: list[dict], fps: float) -> list[dict]:
+    buckets: list[dict] = []
+    for point in points:
+        for bucket in buckets:
+            if abs(point["x"] - bucket["x"]) <= 30 and abs(point["y"] - bucket["y"]) <= 36:
+                count = bucket["n"] + 1
+                bucket["x"] = (bucket["x"] * bucket["n"] + point["x"]) / count
+                bucket["y"] = (bucket["y"] * bucket["n"] + point["y"]) / count
+                bucket["h"] = (bucket["h"] * bucket["n"] + point["h"]) / count
+                bucket["n"] = count
+                break
+        else:
+            buckets.append({"x": point["x"], "y": point["y"], "h": point["h"], "n": 1})
+    return [bucket for bucket in buckets if bucket["n"] >= 8]
+
+
 def _sample_stumps(path: Path) -> list[dict]:
     seen = []
     for index, frame in iter_frames(path):
@@ -301,8 +372,9 @@ def _sample_stumps(path: Path) -> list[dict]:
 def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict) -> dict:
     from bowlinger import __version__
 
-    fps, _width, _height, frame_count, motion, bowler_speed, striker_boxes, grays = _motion_series(path, settings)
-    model_spec = YoloDetector.for_settings(settings).spec
+    fps, _width, _height, frame_count, motion, bowler_speed, striker_boxes, grays, role_points, model_spec = _motion_series(
+        path, settings
+    )
     samples, sample_rate = load_audio(path) or (np.zeros(1, dtype=np.float32), 22050)
     onset_times = []
     if samples.size > sample_rate:
@@ -314,7 +386,22 @@ def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict) -> 
                 onset_times.append(float(onset))
     strides = _bowler_peaks(bowler_speed)
     contacts = _contacts(motion, strides, onset_times)
-    uprights = _sample_stumps(path)
+    if model_spec.provides("bat") and role_points["bat"]:
+        kept_contacts = []
+        for contact in contacts:
+            box = None
+            if striker_boxes:
+                box = min(striker_boxes, key=lambda item: abs(item[0] - contact["time_s"]))[1:]
+            # A run-up or an impact keeps the event. A bare motion blip needs a bat in frame.
+            if contact["source"] in {"audio", "stride"} or contact["score"] >= 7.5 or _bat_near(
+                role_points["bat"], fps, contact["time_s"], box
+            ):
+                kept_contacts.append(contact)
+        if kept_contacts:
+            contacts = kept_contacts
+    uprights = _stumps_from_model(role_points["stumps"], fps) if model_spec.provides("stumps") else []
+    if len(uprights) < 2:
+        uprights = _sample_stumps(path)
     grouped = wicket_uprights(
         [{"x": item["x"], "y": item["y"], "h": item["h"], "n": max(8, item["n"] * 5)} for item in uprights],
         frame_count=40,
@@ -332,10 +419,14 @@ def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict) -> 
         box = None
         if striker_boxes:
             box = min(striker_boxes, key=lambda item: abs(item[0] - contact["time_s"]))[1:]
-        track = _ball_track(grays, fps, contact["time_s"], box, _width, _height)
-        shot = contact["shot"] if contact["shot"] != "drive" else "straight drive"
-        if contact["shot"] == "defence":
+        track = _ball_from_model(role_points["ball"], fps, contact["time_s"], box)
+        if len(track) < 4:
+            track = _ball_track(grays, fps, contact["time_s"], box, _width, _height)
+        shot_name = _shot_from_bat(role_points["bat"], fps, contact["time_s"], box) or contact["shot"]
+        shot = "straight drive" if shot_name == "drive" else shot_name
+        if shot_name == "defence":
             shot = "defence"
+        bat_seen = _bat_near(role_points["bat"], fps, contact["time_s"], box) or not model_spec.provides("bat")
         deliveries.append(
             {
                 "index": number,
@@ -347,7 +438,7 @@ def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict) -> 
                 "predicted_point_count": 0,
                 "occlusion_gaps": [],
                 "batsman_detected": striker_seen,
-                "bat_detected": True,
+                "bat_detected": bat_seen,
                 "contact": {
                     "video_detected": True,
                     "frame": int(round(contact["time_s"] * fps)),

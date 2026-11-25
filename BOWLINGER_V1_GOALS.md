@@ -4,8 +4,8 @@
 > Status legend: `[ ]` Not started · `[/]` In progress · `[x]` Completed (only after successful testing)
 
 **Last updated:** 2026-11-25
-**Current stage:** YOLO is the real-footage detector. Labelled bat swings are found. The ball, the shot name, and runs are not.
-**Next goal to work on:** Drop in custom cricket weights (`models/cricket.pt` and `BOWLINGER_MODEL=cricket`) so bat, ball, and stumps come from the model instead of the classic fallback.
+**Current stage:** `models/cricket.pt` is the default real-footage model. Labelled contact times pass. Shot names, the ball track, and runs do not.
+**Next goal to work on:** G2 and G5. The fine-tune sees the ball in the Roboflow set (mAP50 0.725) but not reliably in these phone clips, and the shot name does not match the labels.
 
 ---
 
@@ -88,7 +88,7 @@
 - [x] Test: release frame within agreed tolerance on test set. `tests/test_real_labels.py` allows 0.6 s. The three labelled sample_01 releases pass. Synthetic release remains exact on the classic path (`tests/test_g1_release.py`).
 
 ## G2 – Ball Detection & Tracking
-- [/] Detect the cricket ball per frame. Synthetic red and white balls are detected. On the real clips the ball is a few pixels at the far end of a 478 px-wide frame. Loose red and white specks are not treated as proof of a ball.
+- [/] Detect the cricket ball per frame. Synthetic red and white balls use the classic fallback. The fine-tune's ball class has validation mAP50 0.725, but on the phone clips it only appears on a couple of frames, so the flight is not a confirmed track.
 - [/] Track the ball from release toward the batsman. Works on synthetic clips. Not observed on the real clips.
 - [/] Store ball position and movement across frames (trajectory). Stored for synthetic tracks. The four `sample_01` tracks are stored and are not a ball trajectory.
 - [/] Maintain a single ball identity throughout one delivery. Synthetic occlusion keeps one id (`tests/test_g2_tracking.py`). Not shown on real footage.
@@ -149,12 +149,12 @@ Both files are portrait phone video of a practice net, with audio. They are not 
 
 | Clip | FPS | Resolution | Audio | What was detected |
 | --- | --- | --- | --- | --- |
-| sample_01.mp4 | 30.00 (2422 frames, 80.74 s) | 478×850 | yes | Striker found by YOLO. Near yellow/blue wicket count 2 (classic fallback). Ball type unknown. Labelled contacts matched at 20.88 s, 40.40 s and 58.54 s (releases 20.18, 39.72, 58.25). Shot name was defence for the two drives as well. Extra contacts near 2, 10, 34, 50, 66, 70 and 80 s. |
-| sample_02.mp4 | 29.99 (2101 frames, 70.05 s) | 478×850 | yes | Striker found. Far wooden stumps missed. Ball type unknown. No release (bowler out of frame). Contacts matched at 5.29, 10.00, 38.92 and 66.22 s. Shot names do not match the labels. Extra contacts near 22.5, 30, 50.2, 54.3 and 69.6 s. |
+| sample_01.mp4 | 30.00 (2422 frames, 80.74 s) | 478×850 | yes | Cricket YOLO model. Striker found. Near stumps found. Ball type unknown. Labelled contacts within 0.5 s and the three releases within 0.6 s. Shot name was defence for the two drives as well. Extra contacts remain. |
+| sample_02.mp4 | 29.99 (2101 frames, 70.05 s) | 478×850 | yes | Cricket YOLO model. Striker found. Far wooden stumps still not counted as a wicket. Ball type unknown. The four labelled contacts match within 0.5 s. Shot names do not match drive/pull. Extra contacts remain, including practice swings. |
 
 ### Other limits
 - Synthetic clips use flat colours, a frontal zoom, and a ball drawn larger than a real cricket ball. They prove the pipeline logic. They do not prove nets or match accuracy.
-- YOLO11n (`models/yolo11n.pt`) is the real-footage detector. COCO has person and sports ball, not a stump, a bat, or a cricket ball. Those roles stay on the classic fallback until `BOWLINGER_MODEL=cricket` and `models/cricket.pt` are provided. The class map is `models/detectors.json`.
+- `models/cricket.pt` is a YOLO11n fine-tune (8 epochs, imgsz 960, CPU) of Roboflow Universe jignesh-workspace/cricket-object-detection-qnjwo v2, CC BY 4.0. Validation: mAP50 0.688, mAP50-95 0.496. Per class mAP50: ball 0.725, bat 0.636, batsman 0.825, bowler 0.877, stumps 0.617, stump-bails 0.000. The images are not in git. The phone clips are a different look from that set, so the ball and the far bat are still mostly missed.
 - Practice stumps in `sample_01` are yellow and blue. White-only detection counted floodlit specks, so a wicket now has to be two or three uprights seen for most of the clip. Wooden stumps on `sample_02` still fail.
 - Tracks that last longer than 2.5 s, crawl, or never reach a detected wicket are dropped. That removed the long false tracks. It does not create a real ball track.
 - Scale, when a wicket is found, uses stump height 0.711 m with no perspective correction. The near stumps in `sample_01` are close to the camera, so that scale would be wrong for the far end. Runs are not trusted on that clip.

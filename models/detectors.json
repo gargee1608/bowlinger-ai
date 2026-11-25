@@ -17,20 +17,32 @@
     "cricket": {
       "weights": "cricket.pt",
       "confidence": 0.25,
-      "image_size": 640,
+      "image_size": 960,
       "classes": {
-        "batsman": 0,
-        "bowler": 1,
-        "bat": 2,
-        "ball": 3,
-        "stumps": 4
+        "ball": 0,
+        "bat": 1,
+        "batsman": 2,
+        "bowler": 3,
+        "fielder": 4,
+        "gloves": 5,
+        "no_gloves": 6,
+        "pads": 7,
+        "person": 8,
+        "shoes": 9,
+        "stump- bails": 10,
+        "stumps": 11,
+        "umpire": 12,
+        "wicket-keeper": 13,
+        "wicket-keeper-gloves": 14,
+        "without-pads": 15,
+        "without-shoes": 16
       },
       "roles": {
         "batsman": "batsman",
         "bowler": "bowler",
         "bat": "bat",
         "ball": "ball",
-        "stumps": "stumps"
+        "stumps": ["stumps", "stump- bails"]
       }
     }
   }

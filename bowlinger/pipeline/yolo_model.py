@@ -45,19 +45,29 @@ class ModelSpec:
     confidence: float
     image_size: int
     classes: dict[str, int]
-    roles: dict[str, str]
+    roles: dict[str, list[str]]
     config_path: Path
 
+    def class_names(self, role: str) -> list[str]:
+        return list(self.roles.get(role, []))
+
+    def class_ids(self, role: str) -> list[int]:
+        return [self.classes[name] for name in self.class_names(role) if name in self.classes]
+
     def class_id(self, role: str) -> int | None:
-        class_name = self.roles.get(role)
-        if class_name is None:
-            return None
-        return self.classes.get(class_name)
+        ids = self.class_ids(role)
+        if ids:
+            return ids[0]
+        if role in ("batsman", "bowler") and self.class_ids("person"):
+            return self.class_ids("person")[0]
+        return None
 
     def provides(self, role: str) -> bool:
-        if role in ("batsman", "bowler") and self.class_id(role) is None and self.class_id("person") is not None:
+        if self.class_ids(role):
             return True
-        return self.class_id(role) is not None
+        if role in ("batsman", "bowler") and self.class_ids("person"):
+            return True
+        return False
 
     def fallback_roles(self) -> list[str]:
         """Roles a custom model has not taken over, so classic CV may fill them."""
@@ -70,29 +80,47 @@ def config_path(settings: Settings | None = None) -> Path:
     return DEFAULT_CONFIG
 
 
+def _names(value) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    return [str(item) for item in value]
+
+
 def load_spec(settings: Settings | None = None, name: str | None = None) -> ModelSpec:
     path = config_path(settings)
     data = json.loads(path.read_text())
-    chosen = name
-    if chosen is None and settings is not None and settings.model_name:
-        chosen = settings.model_name
-    if not chosen:
+    detectors = data.get("detectors", {})
+    explicit = name or (settings.model_name if settings is not None and settings.model_name else "")
+    if explicit:
+        chosen = explicit
+    else:
         chosen = data.get("active", "coco")
+        cricket = detectors.get("cricket")
+        if cricket:
+            weights = Path(cricket["weights"])
+            if not weights.is_absolute():
+                weights = path.parent / weights
+            if weights.is_file():
+                chosen = "cricket"
+            elif chosen == "cricket" and "coco" in detectors:
+                chosen = "coco"
     try:
-        entry = data["detectors"][chosen]
+        entry = detectors[chosen]
     except KeyError as exc:
-        known = ", ".join(sorted(data.get("detectors", {})))
+        known = ", ".join(sorted(detectors))
         raise KeyError(f"No detector {chosen!r} in {path}. Known: {known}") from exc
     weights = Path(entry["weights"])
     if not weights.is_absolute():
         weights = path.parent / weights
+    if not weights.is_file() and chosen != "coco" and "coco" in detectors and not explicit:
+        return load_spec(settings, name="coco")
     return ModelSpec(
         name=chosen,
         weights=weights,
         confidence=float(entry.get("confidence", 0.3)),
         image_size=int(entry.get("image_size", 480)),
         classes={str(key): int(value) for key, value in entry.get("classes", {}).items()},
-        roles={str(role): str(class_name) for role, class_name in entry.get("roles", {}).items()},
+        roles={str(role): _names(class_name) for role, class_name in entry.get("roles", {}).items()},
         config_path=path,
     )
 
@@ -125,7 +153,7 @@ class YoloDetector:
         return cached
 
     def detect(self, frame) -> dict[str, list[Detection]]:
-        wanted = sorted({self.spec.classes[name] for name in self.spec.roles.values() if name in self.spec.classes})
+        wanted = sorted({class_id for role in self.spec.roles for class_id in self.spec.class_ids(role)})
         result = self.model.predict(
             frame,
             verbose=False,
@@ -136,22 +164,23 @@ class YoloDetector:
         grouped: dict[str, list[Detection]] = {role: [] for role in self.spec.roles}
         if result.boxes is None:
             return grouped
-        id_to_roles: dict[int, list[str]] = {}
-        for role, class_name in self.spec.roles.items():
-            class_id = self.spec.classes.get(class_name)
-            if class_id is None:
-                continue
-            id_to_roles.setdefault(class_id, []).append(role)
+        id_to_roles: dict[int, list[tuple[str, str]]] = {}
+        for role, class_names in self.spec.roles.items():
+            for class_name in class_names:
+                class_id = self.spec.classes.get(class_name)
+                if class_id is None:
+                    continue
+                id_to_roles.setdefault(class_id, []).append((role, class_name))
         for box in result.boxes:
             class_id = int(box.cls[0])
             roles = id_to_roles.get(class_id, [])
             x1, y1, x2, y2 = (float(value) for value in box.xyxy[0])
             confidence = float(box.conf[0])
-            for role in roles:
+            for role, class_name in roles:
                 grouped[role].append(
                     Detection(
                         role=role,
-                        class_name=self.spec.roles[role],
+                        class_name=class_name,
                         confidence=confidence,
                         x1=x1,
                         y1=y1,

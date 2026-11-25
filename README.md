@@ -87,7 +87,15 @@ export BOWLINGER_MODEL_CONFIG=models/detectors.json   # optional, this is the de
 python -m bowlinger
 ```
 
-The `cricket` entry expects class ids `batsman`, `bowler`, `bat`, `ball`, and `stumps`. Change the numbers in the JSON to match the model's `names`. No code change.
+The `cricket` entry maps `batsman`, `bowler`, `bat`, `ball`, and `stumps` (including the class `stump- bails`). A role may name one class or a list of them. Change the numbers to match the file's `names`. No code change.
+
+When `models/cricket.pt` is present it is selected automatically. That file is a YOLO11n fine-tune of the Roboflow Universe set [cricket-object-detection v2](https://universe.roboflow.com/jignesh-workspace/cricket-object-detection-qnjwo/dataset/2) by jignesh-workspace, license **CC BY 4.0**. The images are not in this repository. Unpack a YOLO export with:
+
+```bash
+python scripts/fetch_cricket_dataset.py export.zip
+```
+
+That writes `~/cricket_dataset` and turns polygon rows into detection boxes.
 
 `BOWLINGER_DETECTOR=classic` forces the colour fallback. `BOWLINGER_DETECTOR=yolo` forces the configured model even on a synthetic frame. The default `auto` uses YOLO on a real camera image and classic on the synthetic pitch.
 

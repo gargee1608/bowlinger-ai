@@ -2,3 +2,4 @@ Sample/*.mov filter=lfs diff=lfs merge=lfs -text
 Sample/*.mkv filter=lfs diff=lfs merge=lfs -text
 Sample/*.webm filter=lfs diff=lfs merge=lfs -text
 Sample/*.mp4 filter=lfs diff=lfs merge=lfs -text
+models/cricket.pt filter=lfs diff=lfs merge=lfs -text
