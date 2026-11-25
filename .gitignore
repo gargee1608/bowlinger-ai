@@ -7,6 +7,7 @@ __pycache__/
 data/
 *.db
 *.mp4
+!Sample/*.mp4
 *.wav
 .DS_Store
 dist/
