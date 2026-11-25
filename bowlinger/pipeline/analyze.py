@@ -24,6 +24,10 @@ def analyze_video(path: Path, settings: Settings) -> dict:
     audio = inspect_audio(path)
     scan = scan_video(path)
     deliveries, scale = build_deliveries(scan, audio, info["fps"] or 1.0, settings)
+    preanalysis = summarise(scan, audio)
+    tracked_colors = [row["ball_color"] for row in deliveries if row.get("ball_color") in {"red", "white"}]
+    if tracked_colors:
+        preanalysis["ball_type"] = max(set(tracked_colors), key=tracked_colors.count)
     return {
         "pipeline_version": __version__,
         "video": {
@@ -35,7 +39,7 @@ def analyze_video(path: Path, settings: Settings) -> dict:
             "has_audio_stream": info["has_audio_stream"],
         },
         "quality": assess_quality(info, settings),
-        "preanalysis": summarise(scan, audio),
+        "preanalysis": preanalysis,
         "calibration": {
             "method": scale["method"],
             "meters_per_pixel": None if scale["meters_per_pixel"] is None else round(scale["meters_per_pixel"], 6),

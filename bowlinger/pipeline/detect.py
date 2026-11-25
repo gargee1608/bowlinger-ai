@@ -83,7 +83,20 @@ def detect_balls(frame: np.ndarray) -> list[dict]:
         if any((ball["x"] - other["x"]) ** 2 + (ball["y"] - other["y"]) ** 2 < 16**2 for other in whites):
             continue
         reds.append(ball)
-    return reds + whites
+    # A stump broken by the bat can leave a small white disc. It shares the stump's x.
+    stumps = detect_stumps(frame)
+    return [ball for ball in reds + whites if not _on_stump(ball, stumps)]
+
+
+def _on_stump(ball: dict, stumps: list[dict]) -> bool:
+    for stump in stumps:
+        if abs(ball["x"] - stump["x"]) > 12:
+            continue
+        top = stump["y"] - stump["h"] / 2 - 6
+        bottom = stump["y"] + stump["h"] / 2 + 36
+        if top <= ball["y"] <= bottom:
+            return True
+    return False
 
 
 def detect_batsmen(frame: np.ndarray) -> list[dict]:

@@ -81,6 +81,10 @@ def build_deliveries(scan: dict, audio: dict, fps: float, settings: Settings) ->
     for index, track in enumerate(tracks, start=1):
         points = track["points"]
         real = [point for point in points if not point["predicted"]]
+        color_counts = {}
+        for point in real:
+            color_counts[point["color"]] = color_counts.get(point["color"], 0) + 1
+        ball_color = max(color_counts, key=color_counts.get) if color_counts else "unknown"
         released = release_frame(points)
         contact = find_contact(points, bat_xy, batter_xy)
         contact_time = None if contact is None else round(contact["frame"] / fps, 3)
@@ -118,6 +122,7 @@ def build_deliveries(scan: dict, audio: dict, fps: float, settings: Settings) ->
             {
                 "index": index,
                 "ball_track_id": track["id"],
+                "ball_color": ball_color,
                 "release_frame": released,
                 "release_time_s": None if released is None else round(released / fps, 3),
                 "track_point_count": len(points),
