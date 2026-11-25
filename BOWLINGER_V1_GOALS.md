@@ -1,10 +1,10 @@
 # BOWLINGER AI V1 — Goals
 
-Last updated: 2026-11-25 (G0 tests passed)
+Last updated: 2026-11-25 (GB tests passed)
 
-Current stage: G0 foundation is in place. Platform sessions are next.
+Current stage: Upload creates a background session job. Anonymous demo is next.
 
-Next goal to work on: GB — offline analysis on a session id
+Next goal to work on: GC — anonymous demo and public retrieval
 
 > Source note: the session attachment was not present on disk (`BOWLINGER_V1_GOALS.md` / `BOWLINGER_V1_GOALS_73fe.md`). This file is the working goals document, written to match the approved V1 scope in the project brief. It is the source of truth for this repository from here on. Open decisions stay open. Defaults below are implemented so the system can run, and they are marked pending approval.
 
@@ -65,12 +65,12 @@ These are not resolved. The implementation uses the default in the right-hand co
 
 ### GB — Offline analysis on a session id
 
-- [ ] Uploading a video creates a session and a queued job and returns immediately with the session id
-- [ ] A background worker (or the synchronous test worker) runs the job after the response is not required to stay open
-- [ ] `GET /api/sessions/{id}` shows queued, running, completed, or failed, and stores the result or the error
-- [ ] A second client can read the same session id after the uploader is gone
-- [ ] The web UI can upload a file and poll status
-- [ ] Tests in `tests/test_gb_sessions.py` pass
+- [x] Uploading a video creates a session and a queued job and returns immediately with the session id
+- [x] A background worker (or the synchronous test worker) runs the job after the response is not required to stay open
+- [x] `GET /api/sessions/{id}` shows queued, running, completed, or failed, and stores the result or the error
+- [x] A second client can read the same session id after the uploader is gone
+- [x] The web UI can upload a file and poll status
+- [x] Tests in `tests/test_gb_sessions.py` pass
 
 ### GC — Anonymous demo and public retrieval
 
@@ -145,7 +145,7 @@ These are not resolved. The implementation uses the default in the right-hand co
 
 ## Pending work
 
-- GB through G6 as listed above.
+- GC through G6 as listed above.
 - Real cricket clips and a labelled check of GA and G1–G6.
 - Approval of the open decisions.
 

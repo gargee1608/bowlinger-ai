@@ -112,3 +112,59 @@ def get_job(db_path: Path, job_id: str) -> dict | None:
     with connect(db_path) as conn:
         row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
     return dict(row) if row else None
+
+
+def ensure_user(db_path: Path, user_id: str) -> None:
+    with connect(db_path) as conn:
+        conn.execute(
+            "INSERT INTO users (id, created_at) VALUES (?, ?) ON CONFLICT(id) DO NOTHING",
+            (user_id, utcnow()),
+        )
+
+
+def insert_session(
+    db_path: Path,
+    *,
+    session_id: str,
+    user_id: str,
+    source: str,
+    original_name: str,
+    video_path: str,
+    video_bytes: int,
+) -> None:
+    now = utcnow()
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO sessions (
+                id, user_id, status, source, is_public, original_name,
+                video_path, video_bytes, created_at, updated_at
+            ) VALUES (?, ?, 'queued', ?, 1, ?, ?, ?, ?, ?)
+            """,
+            (session_id, user_id, source, original_name, video_path, video_bytes, now, now),
+        )
+
+
+def get_session(db_path: Path, session_id: str) -> dict | None:
+    with connect(db_path) as conn:
+        row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def set_session_status(
+    db_path: Path,
+    session_id: str,
+    status: str,
+    *,
+    error: str | None = None,
+    result_json: str | None = None,
+) -> None:
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE sessions
+            SET status = ?, error = ?, result_json = COALESCE(?, result_json), updated_at = ?
+            WHERE id = ?
+            """,
+            (status, error, result_json, utcnow(), session_id),
+        )

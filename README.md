@@ -29,6 +29,17 @@ docker compose up --build
 
 Same port. The database and videos stay in the `bowlinger-data` volume.
 
+## Upload a video
+
+Open `http://127.0.0.1:8741`, choose a clip, and start analysis. The page polls until the session is `completed` or `failed`.
+
+```bash
+curl -s -F "video=@clip.mp4" -F "user_key=coach_1" http://127.0.0.1:8741/api/sessions
+curl -s http://127.0.0.1:8741/api/sessions/SESSION_ID
+```
+
+The upload call returns a `session_id`. You can close the page and fetch that URL later.
+
 ## Tests
 
 ```bash
