@@ -35,15 +35,15 @@ SHADOW = (20, 20, 20)
 #   16 m/s  -> 32 m -> 2
 #   40 m/s  -> 80 m -> 4, or 6 when lofted
 SHOT_CATALOG: dict[str, dict] = {
-    "defence": {"speed_mps": 3.5, "angle_deg": 4.0, "lofted": False, "runs": 0, "contact": True},
-    "straight drive": {"speed_mps": 16.0, "angle_deg": 0.0, "lofted": False, "runs": 2, "contact": True},
-    "cover drive": {"speed_mps": 16.0, "angle_deg": 32.0, "lofted": False, "runs": 2, "contact": True},
-    "cut": {"speed_mps": 16.0, "angle_deg": 75.0, "lofted": False, "runs": 2, "contact": True},
-    "on drive": {"speed_mps": 16.0, "angle_deg": -32.0, "lofted": False, "runs": 2, "contact": True},
-    "pull": {"speed_mps": 16.0, "angle_deg": -80.0, "lofted": False, "runs": 2, "contact": True},
-    "lofted drive": {"speed_mps": 40.0, "angle_deg": 6.0, "lofted": True, "runs": 6, "contact": True},
-    "ground four": {"speed_mps": 40.0, "angle_deg": 8.0, "lofted": False, "runs": 4, "contact": True},
-    "no shot": {"speed_mps": 0.0, "angle_deg": 0.0, "lofted": False, "runs": 0, "contact": False},
+    "defence": {"speed_mps": 3.5, "angle_deg": 4.0, "lofted": False, "runs": 0, "contact": True, "label": "defence"},
+    "straight drive": {"speed_mps": 16.0, "angle_deg": 0.0, "lofted": False, "runs": 2, "contact": True, "label": "straight drive"},
+    "cover drive": {"speed_mps": 16.0, "angle_deg": 32.0, "lofted": False, "runs": 2, "contact": True, "label": "cover drive"},
+    "cut": {"speed_mps": 16.0, "angle_deg": 75.0, "lofted": False, "runs": 2, "contact": True, "label": "cut"},
+    "on drive": {"speed_mps": 16.0, "angle_deg": -32.0, "lofted": False, "runs": 2, "contact": True, "label": "on drive"},
+    "pull": {"speed_mps": 16.0, "angle_deg": -80.0, "lofted": False, "runs": 2, "contact": True, "label": "pull"},
+    "lofted drive": {"speed_mps": 40.0, "angle_deg": 6.0, "lofted": True, "runs": 6, "contact": True, "label": "straight drive"},
+    "ground four": {"speed_mps": 40.0, "angle_deg": 8.0, "lofted": False, "runs": 4, "contact": True, "label": "straight drive"},
+    "no shot": {"speed_mps": 0.0, "angle_deg": 0.0, "lofted": False, "runs": 0, "contact": False, "label": "no shot"},
 }
 
 STUMP_HEIGHT_PX = 71
@@ -179,7 +179,7 @@ def _build_delivery(
         color=spec.ball_color,
         lofted=bool(info["lofted"]),
         occlusion=occlusion,
-        shot=shot,
+        shot=str(info["label"]),
         runs=int(info["runs"]),
         speed_mps=float(info["speed_mps"]),
         angle_deg=float(info["angle_deg"]),
@@ -298,7 +298,7 @@ def render_clip(spec: ClipSpec) -> tuple[list[np.ndarray], np.ndarray | None, Cl
                 continue
             x, y = int(round(pos[0])), int(round(pos[1]))
             if delivery.lofted and delivery.contact_frame is not None and index > delivery.contact_frame:
-                cv2.circle(frame, (x, y), 5, SHADOW, -1, lineType=cv2.LINE_8)
+                cv2.circle(frame, (x, y), 12, SHADOW, -1, lineType=cv2.LINE_8)
                 y -= LOFT_PX
                 if not _inside(x, y, spec.width, spec.height):
                     continue

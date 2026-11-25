@@ -1,10 +1,10 @@
 # BOWLINGER AI V1 — Goals
 
-Last updated: 2026-11-25 (GC and GD tests passed)
+Last updated: 2026-11-25 (synthetic pipeline tests passed; real sample clips were not on disk)
 
-Current stage: Anonymous sessions and the storage cap are in place. Pre-video analysis is next.
+Current stage: The local app runs the full V1 path on synthetic clips. Vision goals stay partial until real footage is checked.
 
-Next goal to work on: GA — pre-video analysis and quality
+Next goal to work on: Re-run GA and G1–G6 on `Sample/sample_01.mp4` and `Sample/sample_02.mp4` once those files are in the repo. Do not mark those goals `[x]` from synthetic clips alone.
 
 > Source note: the session attachment was not present on disk (`BOWLINGER_V1_GOALS.md` / `BOWLINGER_V1_GOALS_73fe.md`). This file is the working goals document, written to match the approved V1 scope in the project brief. It is the source of truth for this repository from here on. Open decisions stay open. Defaults below are implemented so the system can run, and they are marked pending approval.
 
@@ -93,65 +93,68 @@ These are not resolved. The implementation uses the default in the right-hand co
 
 ### GA — Pre-video analysis and quality
 
-- [ ] Quality report: fps, width, height, duration, warnings below the default 50 FPS / 720p thresholds
-- [ ] Stumps/wickets detected on a synthetic frame (count of uprights)
-- [ ] Ball type `red` or `white` from the moving ball
-- [ ] Batsman on the crease, true or false
-- [ ] Audio presence, true or false
-- [ ] Results stored on the session by the existing job, not a second pipeline
-- [/] Real-footage accuracy is unverified — do not mark this goal `[x]` on synthetic tests alone
+- [x] Quality report: fps, width, height, duration, warnings below the default 50 FPS / 720p thresholds. Tested in `tests/test_ga_preanalysis.py` (metadata, not a vision claim).
+- [/] Stumps/wickets on a synthetic frame (3 uprights). Real-footage accuracy is unverified.
+- [/] Ball type `red` or `white` from the moving ball. Real-footage accuracy is unverified.
+- [/] Batsman on the crease, true or false. Real-footage accuracy is unverified.
+- [x] Audio presence from an audio stream whose RMS is above 0.005. A missing or silent stream is not audio. Not measured on the missing sample clips.
+- [x] Results stored on the session by the existing job, not a second pipeline.
+- [/] Real-footage accuracy is unverified. `tests/test_ga_preanalysis.py` skips `Sample/sample_01.mp4` and `Sample/sample_02.mp4` because those files were not in the workspace.
 
 ### G1 — Ball release
 
-- [ ] Each delivery has a release frame and a release time
-- [ ] A ball that sits in the hand and then moves is released at the motion start, not at the first still frame
-- [/] Checked on synthetic clips only. Real-footage accuracy is unverified.
+- [/] Each delivery has a release frame and a release time. Exact on the synthetic clips in `tests/test_g1_release.py`. Real-footage accuracy is unverified.
+- [/] A ball that sits in the hand and then moves is released at the motion start, not at the first still frame. Real-footage accuracy is unverified.
 
 ### G2 — Ball detection and tracking
 
-- [ ] The ball keeps one id for a delivery
-- [ ] A short occlusion keeps that id, and the missing frames are marked predicted
-- [ ] A gap longer than the configured maximum starts a new id
-- [ ] Two deliveries in one clip become two tracks
-- [/] Checked on synthetic clips only. Real-footage accuracy is unverified.
+- [/] The ball keeps one id for a delivery. Real-footage accuracy is unverified.
+- [/] A short occlusion keeps that id, and the missing frames are marked predicted. Tested with frames 8–13 hidden. Real-footage accuracy is unverified.
+- [/] A gap longer than the configured maximum (0.35 s) starts a new id. Two deliveries become `ball-1` and `ball-2` in `tests/test_g2_tracking.py`. Real-footage accuracy is unverified.
 
 ### G3 — Bat and batsman
 
-- [ ] Batsman region detected on the synthetic crease
-- [ ] Bat detected as an elongated object at the crease
-- [ ] Each delivery reports whether the bat and the batsman were detected
-- [/] Checked on synthetic clips only. Real-footage accuracy is unverified. Kit colours that blend into the pitch will be missed.
+- [/] Batsman region detected on the synthetic crease, and absent when it is not drawn. Real-footage accuracy is unverified.
+- [/] Bat detected as an elongated object at the crease. Real-footage accuracy is unverified. Kit colours that blend into the pitch will be missed.
+- [/] Each delivery reports `bat_detected` and `batsman_detected`. See `tests/test_g3_bat.py`.
 
 ### G4 — Bat-ball contact
 
-- [ ] Video contact frame from the change in ball direction beside the bat
-- [ ] When audio is present and an onset falls in the confirmation window, audio confirmation is `confirmed`
-- [ ] When audio is present but no onset falls in the window, audio confirmation is `not confirmed`
-- [ ] When there is no usable audio, audio confirmation is exactly `no audio second confirmation`
-- [/] Checked on synthetic clips only. Real-footage accuracy is unverified. Audio never creates a contact by itself.
+- [/] Video contact frame from the change in ball direction beside the bat. Exact on synthetic clips. Real-footage accuracy is unverified.
+- [x] When audio is present and an onset falls in the ±0.15 s window, audio confirmation is `confirmed`.
+- [x] When audio is present but no onset falls in the window, audio confirmation is `not confirmed`.
+- [x] When there is no usable audio, audio confirmation is exactly `no audio second confirmation`.
+- [/] Audio never creates a contact by itself. A miss stays `video_detected: false`. Real-footage contact accuracy is unverified. See `tests/test_g4_contact.py`.
 
 ### G5 — Shot identification
 
-- [ ] Post-contact direction is labelled per delivery using the documented angle buckets
-- [ ] A delivery with no video contact is `no shot`
-- [ ] A slow exit after contact is `defence`
-- [/] Checked on synthetic clips only. Real-footage accuracy is unverified. The label set is a geometric heuristic, not a trained classifier.
+- [/] Post-contact direction is labelled per delivery using the documented angle buckets. Synthetic labels covered: defence, straight drive, cover drive, cut, on drive, pull. Real-footage accuracy is unverified.
+- [/] A delivery with no video contact is `no shot`.
+- [/] A slow exit after contact is `defence`.
+- [/] The label set is a geometric heuristic, not a trained classifier. See `tests/test_g5_shot.py`.
 
 ### G6 — Virtual runs per delivery
 
-- [ ] Each delivery has an integer virtual run estimate from the documented distance buckets
-- [ ] The estimate is in the session payload and on the results screen, per delivery
-- [/] Checked on synthetic clips only. Real-footage accuracy is unverified. This is a straight-line carry model, not a fielder simulation.
+- [/] Each delivery has an integer virtual run estimate from the documented distance buckets. Synthetic checks: 0 (defence and no shot), 2 (straight drive), 4 (ground shot at 40 m/s), 6 (lofted). Real-footage accuracy is unverified.
+- [x] The estimate is in the session payload and on the results screen, per delivery (columns Release, Contact, Audio check, Shot, Runs).
+- [/] This is a straight-line carry for 2.0 s, not a fielder simulation. See `tests/test_g6_runs.py`.
 
 ## Pending work
 
-- GA through G6 as listed above.
-- `Sample/sample_01.mp4` and `Sample/sample_02.mp4` were named in a follow-up but the files were not saved into this workspace, so they are not in the repo and have not been measured.
-- Real cricket clips and a labelled check of GA and G1–G6.
+- Put `Sample/sample_01.mp4` and `Sample/sample_02.mp4` in `Sample/` and re-run GA and G1–G6. Record FPS, resolution, audio, and what the detectors actually returned. Do not treat the synthetic passes as real-footage accuracy.
 - Approval of the open decisions.
 
 ## Known issues
 
-- No labelled match footage is in the repo. Synthetic clips use flat colours, a frontal zoom, and a ball drawn larger than a real cricket ball so the classic detector has a stable signal.
+- `Sample/sample_01.mp4` and `Sample/sample_02.mp4` were named in a follow-up. The upload was not saved into this workspace, so the files are not in the repo. Nothing below was measured from them.
+
+| Clip | FPS | Resolution | Audio | Findings |
+| --- | --- | --- | --- | --- |
+| sample_01.mp4 | not available — file missing | not available | not available | not analysed |
+| sample_02.mp4 | not available — file missing | not available | not available | not analysed |
+
+- No labelled match footage is in the repo. Synthetic clips use flat colours, a frontal zoom, and a ball drawn larger than a real cricket ball (about 14 px across at 1 cm per pixel) so the classic detector has a stable signal. H.264 colour shift is enough to break a tight circularity test; the ball threshold is 0.42 for that reason.
+- One stump upright is partly hidden by the bat in the synthetic scene, so its measured height is short. Scale uses the median upright height (0.711 m). Perspective is not corrected.
 - YOLO / COCO weights are not shipped. Pretrained "sports ball" and "person" classes are a poor fit for a cricket ball, stump, and bat, so V1 uses classic colour and shape on purpose.
-- The run and shot models ignore swing, seam, bounce, and perspective.
+- The run and shot models ignore swing, seam, bounce, and fielders. A white ball can grow a red compression fringe; detections that overlap a white ball are kept as white.
+- Git LFS is configured for `Sample/*.mp4` so the real clips can be added without storing the bytes as normal git objects.

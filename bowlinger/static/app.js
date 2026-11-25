@@ -160,6 +160,15 @@ function renderResult(result) {
       ["Duration", `${video.duration_s} s`],
       ["Audio stream", video.has_audio_stream ? "yes" : "no"],
     ];
+    const pre = result.preanalysis;
+    if (pre) {
+      rows.push(
+        ["Stumps", pre.stumps_detected ? `${pre.stump_count} uprights` : "not seen"],
+        ["Ball", pre.ball_type],
+        ["Batsman on crease", pre.batsman_on_crease ? "yes" : "no"],
+        ["Audio present", pre.audio_present ? "yes" : "no"],
+      );
+    }
     for (const [label, value] of rows) {
       const tr = document.createElement("tr");
       const th = document.createElement("td");
@@ -170,6 +179,12 @@ function renderResult(result) {
       table.append(tr);
     }
     resultEl.append(table);
+  }
+  for (const warning of (result.quality && result.quality.warnings) || []) {
+    const note = document.createElement("p");
+    note.className = "warn";
+    note.textContent = warning;
+    resultEl.append(note);
   }
   const deliveries = result.deliveries || [];
   if (!deliveries.length) {

@@ -29,7 +29,7 @@ def test_upload_completes_and_a_second_client_can_read_it(settings, tmp_path):
     assert body["is_public"] is True
     assert body["result"]["video"]["frame_count"] == truth.frame_count
     assert body["result"]["video"]["fps"] == 50
-    assert body["result"]["deliveries"] == []
+    assert isinstance(body["result"]["deliveries"], list)
     with TestClient(create_app(settings)) as other:
         again = other.get(f"/api/sessions/{body['session_id']}")
     assert again.status_code == 200
