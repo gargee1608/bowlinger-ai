@@ -24,7 +24,21 @@
         <label for="user-key">User key <span>optional — leave blank for an anonymous key</span></label>
         <input id="user-key" name="user_key" type="text" maxlength="64" autocomplete="off" placeholder="coach_1">
         <button type="submit" id="upload-button">Start analysis</button>
+        <p class="hint" id="storage-line" hidden></p>
         <p class="form-error" id="upload-error" hidden></p>
+      </form>
+    </section>
+
+    <section class="panel" id="retrieve-panel">
+      <h2>Anonymous demo</h2>
+      <p class="hint">No account. A demo clip is analysed under your user key, or a new anonymous key, and the session stays readable by id.</p>
+      <button type="button" id="demo-button">Run demo</button>
+      <p class="form-error" id="demo-error" hidden></p>
+      <form id="lookup-form">
+        <label for="lookup-id">Open a saved session id</label>
+        <input id="lookup-id" type="text" required placeholder="paste a session id">
+        <button type="submit">Open session</button>
+        <p class="form-error" id="lookup-error" hidden></p>
       </form>
     </section>
 

@@ -46,7 +46,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs (status, created_at);
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 @contextmanager
@@ -143,6 +143,21 @@ def insert_session(
             """,
             (session_id, user_id, source, original_name, video_path, video_bytes, now, now),
         )
+
+
+def list_user_sessions(db_path: Path, user_id: str) -> list[dict]:
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at ASC, rowid ASC",
+            (user_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def delete_session(db_path: Path, session_id: str) -> None:
+    with connect(db_path) as conn:
+        conn.execute("DELETE FROM jobs WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
 
 
 def get_session(db_path: Path, session_id: str) -> dict | None:

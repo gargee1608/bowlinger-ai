@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import re
+import tempfile
 from pathlib import Path
 from uuid import uuid4
 
 from bowlinger.config import Settings
 from bowlinger.db import ensure_user, get_session, insert_session
-from bowlinger.storage import delete_file, normalised_suffix, save_bytes, video_path
+from bowlinger.storage import QuotaError, delete_file, enforce_quota, normalised_suffix, save_bytes, video_path
+from bowlinger.synthetic import SHOT_CATALOG, ClipSpec, write_clip
 
 USER_KEY_RE = re.compile(r"^[A-Za-z0-9_-]{4,64}$")
 
@@ -56,6 +58,7 @@ def accept_video(
         raise ValueError("The video file is empty")
     owner = resolve_user_key(user_key)
     ensure_user(settings.db_path, owner)
+    enforce_quota(settings, owner, len(data))
     session_id = str(uuid4())
     suffix = normalised_suffix(filename)
     path = video_path(settings, owner, session_id, suffix)
@@ -78,3 +81,28 @@ def accept_video(
     if row is None:
         raise RuntimeError("session was not stored")
     return row
+
+
+def accept_demo(settings: Settings, *, user_key: str | None, shot: str = "cover drive") -> dict:
+    """Build a synthetic delivery and store it like an upload. It counts toward quota."""
+    if shot not in SHOT_CATALOG:
+        known = ", ".join(sorted(SHOT_CATALOG))
+        raise ValueError(f"Unknown demo shot {shot!r}. Choose one of: {known}")
+    handle = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    handle.close()
+    tmp = Path(handle.name)
+    try:
+        write_clip(
+            tmp,
+            ClipSpec(shot=shot, include_audio=True, hold_frames=2, pre_frames=10, post_frames=6),
+        )
+        data = tmp.read_bytes()
+    finally:
+        tmp.unlink(missing_ok=True)
+    return accept_video(
+        settings,
+        filename=f"demo-{shot.replace(' ', '-')}.mp4",
+        data=data,
+        user_key=user_key,
+        source="demo",
+    )

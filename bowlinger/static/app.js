@@ -8,10 +8,53 @@ const jobError = document.querySelector("#job-error");
 const resultEl = document.querySelector("#result");
 const userKeyInput = document.querySelector("#user-key");
 
+const storageLine = document.querySelector("#storage-line");
 const storedKey = localStorage.getItem("bowlinger_user_key");
-if (storedKey) userKeyInput.value = storedKey;
+if (storedKey) {
+  userKeyInput.value = storedKey;
+  refreshStorage();
+}
+
+const demoButton = document.querySelector("#demo-button");
+const demoError = document.querySelector("#demo-error");
+const lookupForm = document.querySelector("#lookup-form");
+const lookupId = document.querySelector("#lookup-id");
+const lookupError = document.querySelector("#lookup-error");
 
 let pollTimer = null;
+
+function sessionFromLocation() {
+  const query = new URLSearchParams(location.search).get("session");
+  if (query) return query;
+  const match = location.pathname.match(/^\/s\/([^/]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+demoButton.addEventListener("click", async () => {
+  demoError.hidden = true;
+  demoButton.disabled = true;
+  const body = new FormData();
+  if (userKeyInput.value.trim()) body.set("user_key", userKeyInput.value.trim());
+  try {
+    const response = await fetch("/api/demo", { method: "POST", body });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "Demo failed");
+    remember(payload);
+    showSession(payload);
+    poll(payload.session_id);
+  } catch (error) {
+    demoError.hidden = false;
+    demoError.textContent = error.message;
+  } finally {
+    demoButton.disabled = false;
+  }
+});
+
+lookupForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  lookupError.hidden = true;
+  openSession(lookupId.value.trim());
+});
 
 uploadForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -23,10 +66,7 @@ uploadForm.addEventListener("submit", async (event) => {
     const response = await fetch("/api/sessions", { method: "POST", body });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.detail || "Upload failed");
-    if (payload.user_key) {
-      localStorage.setItem("bowlinger_user_key", payload.user_key);
-      userKeyInput.value = payload.user_key;
-    }
+    remember(payload);
     showSession(payload);
     poll(payload.session_id);
   } catch (error) {
@@ -37,9 +77,48 @@ uploadForm.addEventListener("submit", async (event) => {
   }
 });
 
+function formatBytes(bytes) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${bytes} B`;
+}
+
+async function refreshStorage() {
+  const key = userKeyInput.value.trim();
+  if (!key) return;
+  const response = await fetch(`/api/users/${encodeURIComponent(key)}`);
+  if (!response.ok) return;
+  const usage = await response.json();
+  storageLine.hidden = false;
+  storageLine.textContent = `${formatBytes(usage.used_bytes)} of ${formatBytes(usage.quota_bytes)} used. The oldest session is removed first when a new video does not fit.`;
+}
+
+function remember(payload) {
+  if (!payload.user_key) return;
+  localStorage.setItem("bowlinger_user_key", payload.user_key);
+  userKeyInput.value = payload.user_key;
+  refreshStorage();
+}
+
+async function openSession(sessionId) {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    lookupError.hidden = false;
+    lookupError.textContent = payload.detail || "Session not found";
+    return;
+  }
+  showSession(payload);
+  if (payload.status === "queued" || payload.status === "running") poll(payload.session_id);
+}
+
 function showSession(payload) {
   statusPanel.hidden = false;
   sessionIdEl.textContent = payload.session_id;
+  lookupId.value = payload.session_id;
+  const next = `/s/${payload.session_id}`;
+  if (location.pathname !== next) history.replaceState(null, "", next);
   setStatus(payload.status);
   jobError.hidden = !payload.error;
   jobError.textContent = payload.error || "";
@@ -63,6 +142,9 @@ function poll(sessionId) {
     }
   }, 800);
 }
+
+const initial = sessionFromLocation();
+if (initial) openSession(initial);
 
 function renderResult(result) {
   resultEl.replaceChildren();

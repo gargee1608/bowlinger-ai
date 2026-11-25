@@ -11,10 +11,11 @@ from fastapi.staticfiles import StaticFiles
 
 from bowlinger import __version__
 from bowlinger.config import Settings
-from bowlinger.db import get_session, init_db
+from bowlinger.db import get_session, init_db, list_user_sessions
 from bowlinger.jobs import JobQueue
 from bowlinger.pipeline.analyze import process_job
-from bowlinger.sessions import accept_video, public_session
+from bowlinger.sessions import accept_demo, accept_video, public_session
+from bowlinger.storage import QuotaError, used_bytes
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -73,6 +74,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 user_key=user_key,
                 source="upload",
             )
+        except QuotaError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        queue.enqueue(row["id"])
+        fresh = get_session(settings.db_path, row["id"])
+        return public_session(fresh or row)
+
+    @app.post("/api/demo", status_code=201)
+    def create_demo(user_key: str | None = Form(None), shot: str = Form("cover drive")) -> dict:
+        try:
+            row = accept_demo(settings, user_key=user_key, shot=shot)
+        except QuotaError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         queue.enqueue(row["id"])
@@ -86,8 +101,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Session not found")
         return public_session(row)
 
+    @app.get("/api/users/{user_key}")
+    def read_user(user_key: str) -> dict:
+        sessions = list_user_sessions(settings.db_path, user_key)
+        return {
+            "user_key": user_key,
+            "quota_bytes": settings.quota_bytes,
+            "used_bytes": used_bytes(settings, user_key),
+            "flush_policy": settings.flush_policy,
+            "sessions": [
+                {
+                    "session_id": row["id"],
+                    "status": row["status"],
+                    "source": row["source"],
+                    "original_name": row["original_name"],
+                    "video_bytes": row["video_bytes"],
+                    "created_at": row["created_at"],
+                }
+                for row in sessions
+            ],
+        }
+
     @app.get("/")
     def home() -> FileResponse:
+        return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/s/{session_id}")
+    def session_page(session_id: str) -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

@@ -1,10 +1,10 @@
 # BOWLINGER AI V1 — Goals
 
-Last updated: 2026-11-25 (GB tests passed)
+Last updated: 2026-11-25 (GC and GD tests passed)
 
-Current stage: Upload creates a background session job. Anonymous demo is next.
+Current stage: Anonymous sessions and the storage cap are in place. Pre-video analysis is next.
 
-Next goal to work on: GC — anonymous demo and public retrieval
+Next goal to work on: GA — pre-video analysis and quality
 
 > Source note: the session attachment was not present on disk (`BOWLINGER_V1_GOALS.md` / `BOWLINGER_V1_GOALS_73fe.md`). This file is the working goals document, written to match the approved V1 scope in the project brief. It is the source of truth for this repository from here on. Open decisions stay open. Defaults below are implemented so the system can run, and they are marked pending approval.
 
@@ -74,22 +74,22 @@ These are not resolved. The implementation uses the default in the right-hand co
 
 ### GC — Anonymous demo and public retrieval
 
-- [ ] Upload and demo work with no account
-- [ ] A missing user key is generated, returned, and stored with the session
-- [ ] `POST /api/demo` builds a synthetic delivery, stores it under the quota, and enqueues analysis
-- [ ] The session is readable by id with no other credential
-- [ ] The UI can open a saved session id, including a direct link
-- [ ] Tests in `tests/test_gc_anonymous.py` pass
+- [x] Upload and demo work with no account
+- [x] A missing user key is generated, returned, and stored with the session
+- [x] `POST /api/demo` builds a synthetic delivery, stores it under the quota, and enqueues analysis
+- [x] The session is readable by id with no other credential
+- [x] The UI can open a saved session id, including a direct link
+- [x] Tests in `tests/test_gc_anonymous.py` pass
 
 ### GD — 1 GB cap and oldest-first flush
 
-- [ ] Each user key has a storage cap (default 1 GB)
-- [ ] A video larger than the cap is rejected and nothing else is deleted
-- [ ] When a new video would exceed the cap, oldest sessions for that user are deleted (file and row) until it fits
-- [ ] Another user's sessions are left alone
-- [ ] A flushed session id no longer resolves
-- [ ] Usage is visible on the user endpoint and in the UI
-- [ ] Tests in `tests/test_gd_quota.py` pass
+- [x] Each user key has a storage cap (default 1 GB)
+- [x] A video larger than the cap is rejected and nothing else is deleted
+- [x] When a new video would exceed the cap, oldest sessions for that user are deleted (file and row) until it fits
+- [x] Another user's sessions are left alone
+- [x] A flushed session id no longer resolves
+- [x] Usage is visible on the user endpoint and in the UI
+- [x] Tests in `tests/test_gd_quota.py` pass
 
 ### GA — Pre-video analysis and quality
 
@@ -145,7 +145,8 @@ These are not resolved. The implementation uses the default in the right-hand co
 
 ## Pending work
 
-- GC through G6 as listed above.
+- GA through G6 as listed above.
+- `Sample/sample_01.mp4` and `Sample/sample_02.mp4` were named in a follow-up but the files were not saved into this workspace, so they are not in the repo and have not been measured.
 - Real cricket clips and a labelled check of GA and G1–G6.
 - Approval of the open decisions.
 
