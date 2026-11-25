@@ -95,6 +95,8 @@ button, .button-link {
 
 button:disabled { opacity: 0.6; cursor: progress; }
 
+#lookup-form { margin-top: 22px; }
+
 .form-error { color: var(--danger); margin: 8px 0 0; }
 
 .status-row, .meta-row {
@@ -148,5 +150,23 @@ button:disabled { opacity: 0.6; cursor: progress; }
 @media (max-width: 640px) {
   h1 { font-size: 40px; }
   .status-row, .meta-row { align-items: flex-start; flex-direction: column; }
-  .deliveries { display: block; overflow-x: auto; }
+  .deliveries thead { display: none; }
+  .deliveries, .deliveries tbody, .deliveries tr, .deliveries td { display: block; width: 100%; }
+  .deliveries tr {
+    margin: 12px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .deliveries td {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    border: 0;
+    padding: 4px 0;
+  }
+  .deliveries td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-weight: 600;
+  }
 }

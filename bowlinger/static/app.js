@@ -196,13 +196,16 @@ function renderResult(result) {
   }
   const table = document.createElement("table");
   table.className = "deliveries";
-  const head = document.createElement("tr");
+  const head = document.createElement("thead");
+  const headRow = document.createElement("tr");
   for (const label of ["#", "Release", "Contact", "Audio check", "Shot", "Runs"]) {
     const th = document.createElement("th");
     th.textContent = label;
-    head.append(th);
+    headRow.append(th);
   }
-  table.append(head);
+  head.append(headRow);
+  const body = document.createElement("tbody");
+  table.append(head, body);
   for (const delivery of deliveries) {
     const tr = document.createElement("tr");
     const contact = delivery.contact || {};
@@ -214,12 +217,14 @@ function renderResult(result) {
       delivery.shot || "—",
       delivery.virtual_runs == null ? "—" : String(delivery.virtual_runs),
     ];
-    for (const value of cells) {
+    const labels = ["#", "Release", "Contact", "Audio check", "Shot", "Runs"];
+    cells.forEach((value, index) => {
       const td = document.createElement("td");
+      td.dataset.label = labels[index];
       td.textContent = String(value);
       tr.append(td);
-    }
-    table.append(tr);
+    });
+    body.append(tr);
   }
   resultEl.append(table);
 }
