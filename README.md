@@ -57,7 +57,7 @@ The default cap is 1 GB per user key. When a new video would not fit, the oldest
 
 ## What a finished session contains
 
-- `quality` — fps, size, duration, and warnings below 50 FPS or below 720 px height
+- `quality` — fps, size, duration, and warnings below 50 FPS or when the shorter side is below 720 px
 - `preanalysis` — stump uprights, ball colour (`red`, `white`, or `unknown`), batsman on the crease, audio present
 - `deliveries` — one row each, with `ball_track_id`, release, occlusion gaps, bat and batsman flags, contact, shot, and `virtual_runs`
 
@@ -75,7 +75,7 @@ Computer-vision checks render a synthetic clip (pitch, stumps, batsman, bat, mov
 
 ## Defaults pending approval
 
-- Warn under 50 FPS or under 720 px height
+- Warn under 50 FPS, or when the shorter side is under 720 px
 - 1 GB per user key, oldest session flushed first
 - Audio confirms a video contact only inside ±0.15 s
 - A ball track survives a 0.35 s occlusion, then takes a new id

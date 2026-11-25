@@ -3,8 +3,35 @@
 from __future__ import annotations
 
 
+def wicket_uprights(stumps: list[dict], frame_count: int) -> list[dict]:
+    """Keep uprights that are seen repeatedly and stand in a set of two or three.
+
+    A single pale speck, or a lone net pole, is not a wicket.
+    """
+    sampled = max(1, frame_count // 2)
+    minimum_seen = max(3, int(0.12 * sampled))
+    strong = [item for item in stumps if item["n"] >= minimum_seen and item["h"] >= 18]
+    groups: list[dict] = []
+    for stump in strong:
+        for group in groups:
+            if abs(stump["x"] - group["x"]) <= 70 and abs(stump["y"] - group["y"]) <= 90:
+                count = group["n"] + 1
+                group["x"] = (group["x"] * group["n"] + stump["x"]) / count
+                group["y"] = (group["y"] * group["n"] + stump["y"]) / count
+                group["n"] = count
+                group["members"].append(stump)
+                break
+        else:
+            groups.append({"x": stump["x"], "y": stump["y"], "n": 1, "members": [stump]})
+    kept: list[dict] = []
+    for group in groups:
+        if 2 <= len(group["members"]) <= 4:
+            kept.extend(group["members"])
+    return kept
+
+
 def summarise(scan: dict, audio: dict) -> dict:
-    stumps = [item for item in scan["stumps"] if item["n"] >= 2]
+    stumps = wicket_uprights(scan["stumps"], scan["frame_count"])
     stump_count = len(stumps)
     colors = [ball["color"] for ball in scan["balls"]]
     if not colors:

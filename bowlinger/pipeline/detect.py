@@ -33,13 +33,13 @@ def _contours(mask: np.ndarray):
     return found[0]
 
 
-def detect_stumps(frame: np.ndarray) -> list[dict]:
-    blue, green, red = cv2.split(frame)
-    white = (red > 210) & (green > 210) & (blue > 210)
+def _uprights_from_mask(mask: np.ndarray, min_height: int, max_width: int, min_aspect: float) -> list[dict]:
     stumps = []
-    for contour in _contours(white):
+    for contour in _contours(mask):
         x, y, width, height = cv2.boundingRect(contour)
-        if height < 18 or width > 28 or height / max(width, 1) < 2.8:
+        if height < min_height or width > max_width or width < 1:
+            continue
+        if height / max(width, 1) < min_aspect:
             continue
         stumps.append(
             {
@@ -49,6 +49,24 @@ def detect_stumps(frame: np.ndarray) -> list[dict]:
                 "h": height,
             }
         )
+    return stumps
+
+
+def detect_stumps(frame: np.ndarray) -> list[dict]:
+    """White uprights, plus the yellow and blue sticks used in practice nets.
+
+    Yellow is kept very bright so floodlit grass is not treated as a stump.
+    Callers still have to group uprights into a wicket. Scattered poles do not count.
+    """
+    blue, green, red = cv2.split(frame)
+    white = (red > 210) & (green > 210) & (blue > 210)
+    stumps = _uprights_from_mask(white, min_height=18, max_width=28, min_aspect=2.8)
+    yellow = ((red > 220) & (green > 100) & (blue < 110) & (red > blue + 80)).astype(np.uint8) * 255
+    blue_stick = ((blue > 110) & (blue > red + 40) & (blue > green + 10) & (red < 150)).astype(np.uint8) * 255
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 11))
+    for mask in (yellow, blue_stick):
+        closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        stumps.extend(_uprights_from_mask(closed > 0, min_height=24, max_width=24, min_aspect=2.2))
     return stumps
 
 
@@ -106,9 +124,10 @@ def detect_batsmen(frame: np.ndarray) -> list[dict]:
     people = []
     for contour in _contours(jersey):
         area = float(cv2.contourArea(contour))
-        if area < 180:
-            continue
         x, y, width, height = cv2.boundingRect(contour)
+        # A practice stump is a thin blue stick. A torso is wider than that.
+        if area < 180 or width < 14:
+            continue
         people.append({"x": x + width / 2, "y": y + height / 2, "w": width, "h": height, "area": area})
     return people
 

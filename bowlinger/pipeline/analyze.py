@@ -28,6 +28,9 @@ def analyze_video(path: Path, settings: Settings) -> dict:
     tracked_colors = [row["ball_color"] for row in deliveries if row.get("ball_color") in {"red", "white"}]
     if tracked_colors:
         preanalysis["ball_type"] = max(set(tracked_colors), key=tracked_colors.count)
+    else:
+        # Loose red and white specks are not a ball. Say so instead of voting on them.
+        preanalysis["ball_type"] = "unknown"
     return {
         "pipeline_version": __version__,
         "video": {

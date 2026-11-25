@@ -119,12 +119,26 @@ def track_balls(balls: list[dict], frame_count: int, fps: float, max_gap_s: floa
         finished.append(track)
 
     kept = []
+    max_span = max(8, int(round(fps * 2.5)))
     for track in finished:
         real = [point for point in track["points"] if not point["predicted"]]
         if len(real) < 5:
             continue
         travel = _hypot(real[-1]["x"] - real[0]["x"], real[-1]["y"] - real[0]["y"])
-        if travel < 15:
+        span = real[-1]["frame"] - real[0]["frame"]
+        # One bowling flight is short. A speck that drifts for most of a clip is not the ball.
+        if travel < 15 or span <= 0 or span > max_span:
+            continue
+        steps = []
+        for earlier, later in zip(real, real[1:]):
+            step = later["frame"] - earlier["frame"]
+            if step > 0:
+                steps.append(_hypot(later["x"] - earlier["x"], later["y"] - earlier["y"]) / step)
+        if not steps:
+            continue
+        ordered = sorted(steps)
+        median_speed = ordered[len(ordered) // 2]
+        if median_speed < 2.5:
             continue
         kept.append(track)
     kept.sort(key=lambda track: track["points"][0]["frame"])

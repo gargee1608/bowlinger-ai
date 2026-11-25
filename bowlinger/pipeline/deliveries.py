@@ -6,6 +6,7 @@ import math
 
 from bowlinger.config import Settings
 from bowlinger.pipeline.contact import audio_confirmation, find_contact
+from bowlinger.pipeline.preanalysis import wicket_uprights
 from bowlinger.pipeline.release import release_frame
 from bowlinger.pipeline.shot import exit_angle_deg, shot_name, virtual_runs
 from bowlinger.pipeline.track import track_balls
@@ -72,11 +73,34 @@ def _mean_step(points: list[dict], start_frame: int, end_frame: int) -> tuple[fl
     return sum(vxs) / len(vxs), sum(vys) / len(vys)
 
 
+def _approaches_wicket(track: dict, uprights: list[dict]) -> bool:
+    """A delivery is a ball flight that reaches the stumps. With no wicket, do not invent one."""
+    if not uprights:
+        return False
+    for point in track["points"]:
+        if point["predicted"]:
+            continue
+        if _near_wicket(point, uprights, 130):
+            return True
+    return False
+
+
+def _near_wicket(point: dict, uprights: list[dict], limit: float) -> bool:
+    return any((point["x"] - stump["x"]) ** 2 + (point["y"] - stump["y"]) ** 2 <= limit**2 for stump in uprights)
+
+
 def build_deliveries(scan: dict, audio: dict, fps: float, settings: Settings) -> tuple[list[dict], dict]:
-    scale = calibration(scan["stumps"], settings)
-    tracks = track_balls(scan["balls"], scan["frame_count"], fps, settings.occlusion_max_gap_s)
-    bat_xy = _center(scan["bats"])
-    batter_xy = _center(scan["batsmen"])
+    uprights = wicket_uprights(scan["stumps"], scan["frame_count"])
+    scale = calibration(uprights, settings)
+    tracks = [
+        track
+        for track in track_balls(scan["balls"], scan["frame_count"], fps, settings.occlusion_max_gap_s)
+        if _approaches_wicket(track, uprights)
+    ]
+    bats = [bat for bat in scan["bats"] if _near_wicket(bat, uprights, 120)]
+    people = [person for person in scan["batsmen"] if _near_wicket(person, uprights, 160)]
+    bat_xy = _center(bats)
+    batter_xy = _center(people)
     deliveries = []
     for index, track in enumerate(tracks, start=1):
         points = track["points"]

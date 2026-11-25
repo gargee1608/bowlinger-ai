@@ -6,7 +6,6 @@ not claim on-field accuracy.
 
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
 from bowlinger.api import create_app
@@ -85,15 +84,28 @@ def test_session_stores_preanalysis(settings, tmp_path):
     assert body["result"]["quality"]["passes"] is False
 
 
-@pytest.mark.skipif(
-    not all(path.is_file() for path in REAL_CLIPS),
-    reason="Sample/sample_01.mp4 and Sample/sample_02.mp4 were not saved into the workspace",
-)
-def test_real_sample_clips_have_a_quality_and_preanalysis(settings):
-    for path in REAL_CLIPS:
+def test_real_sample_clips_match_what_the_phone_footage_actually_is(settings):
+    """These two nets clips are the real test set. Vision beyond the checks below is not claimed."""
+    expected = {
+        SAMPLE_DIR / "sample_01.mp4": (True, 2),  # near yellow stick and blue stick
+        SAMPLE_DIR / "sample_02.mp4": (False, 0),  # far wooden stumps are too small
+    }
+    for path, (stumps, stump_count) in expected.items():
+        assert path.is_file(), path
         result = analyze_video(path, settings)
-        assert result["quality"]["fps"] > 0
-        assert result["quality"]["width"] > 0
-        assert result["quality"]["height"] > 0
-        assert "audio_present" in result["preanalysis"]
-        assert "stumps_detected" in result["preanalysis"]
+        quality = result["quality"]
+        assert 29 <= quality["fps"] <= 31
+        assert quality["width"] == 478
+        assert quality["height"] == 850
+        assert quality["passes"] is False
+        warning_text = " ".join(quality["warnings"])
+        assert "50" in warning_text
+        assert "478px" in warning_text
+        pre = result["preanalysis"]
+        assert pre["audio_present"] is True
+        assert pre["stumps_detected"] is stumps
+        assert pre["stump_count"] == stump_count
+        assert pre["batsman_on_crease"] is False
+        if not stumps:
+            assert result["deliveries"] == []
+            assert pre["ball_type"] == "unknown"

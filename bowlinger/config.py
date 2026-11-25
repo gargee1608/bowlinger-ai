@@ -35,6 +35,7 @@ class Settings:
     # 1 GB per user key. Oldest session is removed first when this is exceeded.
     quota_bytes: int = 1_073_741_824
     # Quality warnings. A clip at the threshold is accepted without a warning.
+    # min_height applies to the shorter side, so a tall portrait phone clip still warns.
     min_fps: float = 50.0
     min_height: int = 720
     flush_policy: str = "oldest_first"

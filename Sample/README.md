@@ -1,7 +1,8 @@
 # Sample clips
 
-`sample_01.mp4` and `sample_02.mp4` are the real cricket clips for V1 checks.
+`sample_01.mp4` and `sample_02.mp4` are the real practice-net clips for V1.
 
-They were not in the workspace when this repository was built — the upload was not saved — so no FPS, resolution, audio, or detector findings have been recorded for them. `tests/test_ga_preanalysis.py` skips the real-clip test until both files are here.
+Both are portrait phone video, 478×850, about 30 FPS, with audio. Findings are in `BOWLINGER_V1_GOALS.md`. They are not labelled delivery by delivery.
 
-Video files in this folder are tracked with Git LFS (`Sample/*.mp4`).
+Video files in this folder are tracked with Git LFS.
+
