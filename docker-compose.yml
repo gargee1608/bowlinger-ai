@@ -1,0 +1,13 @@
+services:
+  bowlinger:
+    build: .
+    ports:
+      - "8741:8741"
+    environment:
+      BOWLINGER_DATA: /data
+      BOWLINGER_PORT: "8741"
+    volumes:
+      - bowlinger-data:/data
+
+volumes:
+  bowlinger-data:
