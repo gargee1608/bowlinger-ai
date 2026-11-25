@@ -1,0 +1,110 @@
+{
+  "description": "Ground truth read from the two phone clips by looking at frames, not from the detector. The ball is only a few pixels and was not resolved, so release is the visible bowling stride and contact is the frame the bat comes down. Times are about ±0.2 s. Runs are omitted where the ball's travel could not be seen.",
+  "tolerance": {
+    "release_s": 0.6,
+    "contact_s": 0.5
+  },
+  "shot_families": {
+    "defence": ["defence"],
+    "drive": ["drive", "straight drive", "cover drive", "on drive"],
+    "pull": ["pull"]
+  },
+  "clips": [
+    {
+      "file": "Sample/sample_01.mp4",
+      "scene": {
+        "striker_visible": true,
+        "near_wicket_visible": true,
+        "far_wicket_visible": true,
+        "audio": true,
+        "ball_type": null,
+        "notes": "Night practice net. Near stumps are yellow and blue. Striker in whites at the far end. Bowler in a white shirt runs in from the near end."
+      },
+      "deliveries": [
+        {
+          "id": "s01-1",
+          "release_s": 20.5,
+          "contact_s": 20.95,
+          "outcome": "hit",
+          "shot": "defence",
+          "expected_runs": 0,
+          "ball_visible": false,
+          "notes": "Bowler’s arm comes through around 20.4–20.6. The bat comes down in a block by 21.0. Ball not resolved, so runs are 0 only because the shot is a block."
+        },
+        {
+          "id": "s01-2",
+          "release_s": 40.05,
+          "contact_s": 40.45,
+          "outcome": "hit",
+          "shot": "drive",
+          "expected_runs": null,
+          "ball_visible": false,
+          "notes": "Release as the front arm finishes around 40.0. Bat swings through around 40.4. Where the ball went is not visible."
+        },
+        {
+          "id": "s01-3",
+          "release_s": 58.1,
+          "contact_s": 58.75,
+          "outcome": "hit",
+          "shot": "drive",
+          "expected_runs": null,
+          "ball_visible": false,
+          "notes": "Bowler in delivery stride just after 58.0. Bat follows through high around 58.8–59.0."
+        }
+      ]
+    },
+    {
+      "file": "Sample/sample_02.mp4",
+      "scene": {
+        "striker_visible": true,
+        "near_wicket_visible": false,
+        "far_wicket_visible": true,
+        "audio": true,
+        "ball_type": null,
+        "notes": "Dusk net, camera behind the bowler. Far wooden stumps are small. The bowler is mostly out of frame, so release is not labelled."
+      },
+      "deliveries": [
+        {
+          "id": "s02-1",
+          "release_s": null,
+          "contact_s": 5.4,
+          "outcome": "hit",
+          "shot": "drive",
+          "expected_runs": null,
+          "ball_visible": false,
+          "notes": "Bat swings through around 5.4. Release was not in frame."
+        },
+        {
+          "id": "s02-2",
+          "release_s": null,
+          "contact_s": 10.15,
+          "outcome": "hit",
+          "shot": "drive",
+          "expected_runs": null,
+          "ball_visible": false,
+          "notes": "Another swing through the line around 10.1."
+        },
+        {
+          "id": "s02-3",
+          "release_s": null,
+          "contact_s": 38.9,
+          "outcome": "hit",
+          "shot": "pull",
+          "expected_runs": null,
+          "ball_visible": false,
+          "notes": "Backlift then a high across follow-through at 38.8–39.2. Rough call: pull. Ball path not visible."
+        },
+        {
+          "id": "s02-4",
+          "release_s": null,
+          "contact_s": 66.2,
+          "outcome": "hit",
+          "shot": "drive",
+          "expected_runs": null,
+          "ball_visible": false,
+          "notes": "Bat comes down and through around 66.2."
+        }
+      ]
+    }
+  ]
+}

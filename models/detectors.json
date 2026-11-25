@@ -1,0 +1,49 @@
+{
+  "active": "coco",
+  "detectors": {
+    "coco": {
+      "weights": "yolo11n.pt",
+      "confidence": 0.3,
+      "image_size": 480,
+      "classes": {
+        "person": 0,
+        "sports_ball": 32
+      },
+      "roles": {
+        "person": "person",
+        "ball": "sports_ball"
+      }
+    },
+    "cricket": {
+      "weights": "cricket.pt",
+      "confidence": 0.25,
+      "image_size": 960,
+      "classes": {
+        "ball": 0,
+        "bat": 1,
+        "batsman": 2,
+        "bowler": 3,
+        "fielder": 4,
+        "gloves": 5,
+        "no_gloves": 6,
+        "pads": 7,
+        "person": 8,
+        "shoes": 9,
+        "stump- bails": 10,
+        "stumps": 11,
+        "umpire": 12,
+        "wicket-keeper": 13,
+        "wicket-keeper-gloves": 14,
+        "without-pads": 15,
+        "without-shoes": 16
+      },
+      "roles": {
+        "batsman": "batsman",
+        "bowler": "bowler",
+        "bat": "bat",
+        "ball": "ball",
+        "stumps": ["stumps", "stump- bails"]
+      }
+    }
+  }
+}

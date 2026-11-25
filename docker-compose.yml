@@ -1,0 +1,18 @@
+services:
+  bowlinger:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:8741:8741"
+    environment:
+      BOWLINGER_HOST: 0.0.0.0
+      BOWLINGER_PORT: "8741"
+      BOWLINGER_DATA: /data
+      BOWLINGER_DB: /var/lib/bowlinger/bowlinger.db
+    volumes:
+      - bowlinger-videos:/data
+      - bowlinger-db:/var/lib/bowlinger
+
+volumes:
+  bowlinger-videos:
+  bowlinger-db:

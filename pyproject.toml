@@ -1,0 +1,11 @@
+[project]
+name = "bowlinger"
+version = "0.1.0"
+description = "BOWLINGER AI V1 — local cricket delivery video analysis"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

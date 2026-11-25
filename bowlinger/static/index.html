@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <title>BOWLINGER — delivery analysis</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Cricket video</p>
+      <h1>BOWLINGER</h1>
+    </div>
+    <p class="lede">Upload a clip. The reading runs in the background against a session id, so you can leave and open it again.</p>
+  </header>
+
+  <main>
+    <section class="panel" id="upload-panel">
+      <h2>Upload a video</h2>
+      <form id="upload-form">
+        <label for="video">Match or practice clip</label>
+        <input id="video" name="video" type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska,.mp4,.mov,.mkv,.webm,.avi" required>
+        <label for="user-key">User key <span>optional — leave blank for an anonymous key</span></label>
+        <input id="user-key" name="user_key" type="text" maxlength="64" autocomplete="off" placeholder="coach_1">
+        <button type="submit" id="upload-button">Start analysis</button>
+        <p class="hint" id="storage-line" hidden></p>
+        <p class="form-error" id="upload-error" hidden></p>
+      </form>
+    </section>
+
+    <section class="panel" id="retrieve-panel">
+      <h2>Anonymous demo</h2>
+      <p class="hint">No account. A demo clip is analysed under your user key, or a new anonymous key, and the session stays readable by id.</p>
+      <button type="button" id="demo-button">Run demo</button>
+      <p class="form-error" id="demo-error" hidden></p>
+      <form id="lookup-form">
+        <label for="lookup-id">Open a saved session id</label>
+        <input id="lookup-id" type="text" required placeholder="paste a session id">
+        <button type="submit">Open session</button>
+        <p class="form-error" id="lookup-error" hidden></p>
+      </form>
+    </section>
+
+    <section class="panel" id="status-panel" hidden>
+      <div class="status-row">
+        <h2>Session</h2>
+        <span class="pill" id="status-pill">queued</span>
+      </div>
+      <p class="session-id" id="session-id"></p>
+      <p class="hint">Save this id. Anyone with it can open the result. This page keeps asking until the job finishes.</p>
+      <p class="form-error" id="job-error" hidden></p>
+      <div id="result"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
