@@ -24,10 +24,10 @@ The app listens on port **8741**: [http://127.0.0.1:8741](http://127.0.0.1:8741)
 ## Run with Docker Compose
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
-Same port. The database and videos stay in the `bowlinger-data` volume.
+Port **8741** is published on `0.0.0.0`. Uploaded videos and the SQLite database are in separate volumes (`bowlinger-videos` and `bowlinger-db`), and the container restarts unless you stop it. Server install, update, Tailscale, and Cloudflare Tunnel steps are in [DEPLOY.md](DEPLOY.md).
 
 ## Upload a video
 
