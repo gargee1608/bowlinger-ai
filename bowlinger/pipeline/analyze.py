@@ -15,13 +15,14 @@ from bowlinger.media import probe
 from bowlinger.pipeline.audio import inspect_audio
 from bowlinger.pipeline.deliveries import build_deliveries
 from bowlinger.pipeline.detect import scan_video
+from bowlinger.pipeline.footage import analyze_footage, footage_texture
 from bowlinger.pipeline.preanalysis import summarise
 from bowlinger.pipeline.quality import assess_quality
+from bowlinger.pipeline.registry import register_analyzer
 
 
-def analyze_video(path: Path, settings: Settings) -> dict:
-    info = probe(path)
-    audio = inspect_audio(path)
+@register_analyzer("classic")
+def analyze_classic(path: Path, settings: Settings, info: dict, audio: dict) -> dict:
     scan = scan_video(path)
     deliveries, scale = build_deliveries(scan, audio, info["fps"] or 1.0, settings)
     preanalysis = summarise(scan, audio)
@@ -50,6 +51,29 @@ def analyze_video(path: Path, settings: Settings) -> dict:
         },
         "deliveries": deliveries,
     }
+
+
+def _use_footage(path: Path, settings: Settings) -> bool:
+    if settings.detector == "classic":
+        return False
+    if settings.detector == "footage":
+        return True
+    # One textured frame means a camera, not the flat synthetic pitch.
+    return footage_texture(path) >= 300
+
+
+def analyze_video(path: Path, settings: Settings) -> dict:
+    info = probe(path)
+    audio = inspect_audio(path)
+    if _use_footage(path, settings):
+        try:
+            return analyze_footage(path, settings, info, audio)
+        except FileNotFoundError:
+            if settings.detector == "yolo":
+                raise
+            # The configured weights are not on disk. Classic CV is the fallback.
+            return analyze_classic(path, settings, info, audio)
+    return analyze_classic(path, settings, info, audio)
 
 
 def process_job(settings: Settings, job: dict) -> None:

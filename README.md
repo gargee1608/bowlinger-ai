@@ -2,7 +2,7 @@
 
 Local cricket video analysis. Upload a clip, or run the anonymous demo. Analysis is a background job on a session id, so you can close the page and open the result later.
 
-Each delivery reports release, ball track, bat and batsman, bat-ball contact, a shot name, and a virtual run estimate. The vision steps are checked on synthetic clips generated in the tests. Real-footage accuracy is not verified: `Sample/sample_01.mp4` and `Sample/sample_02.mp4` were not in this workspace. Status and open decisions are in [BOWLINGER_V1_GOALS.md](BOWLINGER_V1_GOALS.md).
+Each delivery reports release, ball track, bat and batsman, bat-ball contact, a shot name, and a virtual run estimate. Real phone clips live in `Sample/`. Status and open decisions are in [BOWLINGER_V1_GOALS.md](BOWLINGER_V1_GOALS.md).
 
 ## Requirements
 
@@ -71,7 +71,31 @@ Shots are a geometric label (`defence`, `straight drive`, `cover drive`, `cut`, 
 pytest
 ```
 
-Computer-vision checks render a synthetic clip (pitch, stumps, batsman, bat, moving ball, optional impact sound) and run the same pipeline as an upload. They do not measure accuracy on real match footage. The real-clip test skips while `Sample/sample_01.mp4` and `Sample/sample_02.mp4` are absent.
+Synthetic clips still exercise the classic colour fallback. `tests/test_real_labels.py` checks the two phone clips against `Sample/labels.json`.
+
+## Swapping the YOLO model
+
+YOLO is the detector on real footage. Classic colour and shape runs only when a role is missing from the class map, or when the frame is the flat synthetic pitch.
+
+The active model is `models/detectors.json`. The shipped entry is `coco`: Ultralytics YOLO11n (`models/yolo11n.pt`) with COCO classes `person` (0) and `sports_ball` (32). Person boxes are split into batsman and bowler by where they stand. `bat` and `stumps` are not in COCO, so those two roles use the classic fallback until a model names them.
+
+To use your own weights later, copy the file into `models/` and point the `cricket` entry at it (or add a new entry). Then either set `"active"` or export the name:
+
+```bash
+export BOWLINGER_MODEL=cricket
+export BOWLINGER_MODEL_CONFIG=models/detectors.json   # optional, this is the default
+python -m bowlinger
+```
+
+The `cricket` entry expects class ids `batsman`, `bowler`, `bat`, `ball`, and `stumps`. Change the numbers in the JSON to match the model's `names`. No code change.
+
+`BOWLINGER_DETECTOR=classic` forces the colour fallback. `BOWLINGER_DETECTOR=yolo` forces the configured model even on a synthetic frame. The default `auto` uses YOLO on a real camera image and classic on the synthetic pitch.
+
+If `models/yolo11n.pt` is missing:
+
+```bash
+python scripts/download_yolo_weights.py
+```
 
 ## Defaults pending approval
 

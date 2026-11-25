@@ -7,3 +7,4 @@ librosa==1.0.1
 soundfile==0.14.0
 pytest==9.2.0
 httpx==0.28.1
+ultralytics==8.4.218

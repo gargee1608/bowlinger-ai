@@ -54,6 +54,11 @@ class Settings:
     sync_jobs: bool = False
     host: str = "0.0.0.0"
     port: int = 8741
+    # auto: YOLO footage analyzer on a real camera frame, classic on the flat synthetic pitch.
+    # classic forces the colour fallback. yolo forces the model in model_config.
+    detector: str = "auto"
+    model_config: Path | None = None
+    model_name: str = ""
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -74,4 +79,9 @@ class Settings:
             sync_jobs=_flag("BOWLINGER_SYNC_JOBS", False),
             host=os.environ.get("BOWLINGER_HOST", "0.0.0.0"),
             port=_int("BOWLINGER_PORT", 8741),
+            detector=os.environ.get("BOWLINGER_DETECTOR", "auto"),
+            model_config=Path(os.environ["BOWLINGER_MODEL_CONFIG"]).expanduser()
+            if os.environ.get("BOWLINGER_MODEL_CONFIG")
+            else None,
+            model_name=os.environ.get("BOWLINGER_MODEL", ""),
         )

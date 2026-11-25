@@ -1,0 +1,37 @@
+{
+  "active": "coco",
+  "detectors": {
+    "coco": {
+      "weights": "yolo11n.pt",
+      "confidence": 0.3,
+      "image_size": 480,
+      "classes": {
+        "person": 0,
+        "sports_ball": 32
+      },
+      "roles": {
+        "person": "person",
+        "ball": "sports_ball"
+      }
+    },
+    "cricket": {
+      "weights": "cricket.pt",
+      "confidence": 0.25,
+      "image_size": 640,
+      "classes": {
+        "batsman": 0,
+        "bowler": 1,
+        "bat": 2,
+        "ball": 3,
+        "stumps": 4
+      },
+      "roles": {
+        "batsman": "batsman",
+        "bowler": "bowler",
+        "bat": "bat",
+        "ball": "ball",
+        "stumps": "stumps"
+      }
+    }
+  }
+}
