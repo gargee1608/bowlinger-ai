@@ -6,11 +6,12 @@ GB stores a readable-video result. Later goals add fields to the same dict.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from bowlinger import __version__
 from bowlinger.config import Settings
-from bowlinger.db import get_session, set_session_status
+from bowlinger.db import get_session, set_session_progress, set_session_status
 from bowlinger.media import probe
 from bowlinger.pipeline.areas import apply_marks, attach_delivery_rules, box_from_center, empty_geometry, lock_stump_box
 from bowlinger.pipeline.audio import inspect_audio
@@ -23,7 +24,9 @@ from bowlinger.pipeline.registry import register_analyzer
 
 
 @register_analyzer("classic")
-def analyze_classic(path: Path, settings: Settings, info: dict, audio: dict) -> dict:
+def analyze_classic(path: Path, settings: Settings, info: dict, audio: dict, progress=None) -> dict:
+    if progress:
+        progress("Analysing the clip", 20)
     scan = scan_video(path)
     deliveries, scale = build_deliveries(scan, audio, info["fps"] or 1.0, settings)
     preanalysis = summarise(scan, audio)
@@ -85,18 +88,18 @@ def _use_footage(path: Path, settings: Settings) -> bool:
     return footage_texture(path) >= 300
 
 
-def analyze_video(path: Path, settings: Settings) -> dict:
+def analyze_video(path: Path, settings: Settings, progress=None) -> dict:
     info = probe(path)
     audio = inspect_audio(path)
     if _use_footage(path, settings):
         try:
-            return analyze_footage(path, settings, info, audio)
+            return analyze_footage(path, settings, info, audio, progress)
         except FileNotFoundError:
             if settings.detector == "yolo":
                 raise
             # The configured weights are not on disk. Classic CV is the fallback.
-            return analyze_classic(path, settings, info, audio)
-    return analyze_classic(path, settings, info, audio)
+            return analyze_classic(path, settings, info, audio, progress)
+    return analyze_classic(path, settings, info, audio, progress)
 
 
 def process_job(settings: Settings, job: dict) -> None:
@@ -104,13 +107,25 @@ def process_job(settings: Settings, job: dict) -> None:
     if session is None:
         raise RuntimeError(f"session {job['session_id']} not found")
     set_session_status(settings.db_path, session["id"], "running", error=None)
+    last_progress = {"at": 0.0}
+
+    def report(stage: str, percent: float) -> None:
+        now = time.perf_counter()
+        bounded = max(0, min(99, int(percent)))
+        if bounded < 99 and now - last_progress["at"] < 0.4:
+            return
+        last_progress["at"] = now
+        set_session_progress(settings.db_path, session["id"], stage, bounded)
+
     try:
-        result = analyze_video(Path(session["video_path"]), settings)
+        report("Starting", 0)
+        result = analyze_video(Path(session["video_path"]), settings, report)
         if session.get("overrides_json"):
             result = apply_marks(result, json.loads(session["overrides_json"]))
     except Exception as exc:
         set_session_status(settings.db_path, session["id"], "failed", error=str(exc))
         raise
+    set_session_progress(settings.db_path, session["id"], None, None)
     set_session_status(
         settings.db_path,
         session["id"],

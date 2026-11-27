@@ -125,14 +125,34 @@ def load_spec(settings: Settings | None = None, name: str | None = None) -> Mode
     )
 
 
+def configure_cpu_threads() -> None:
+    """One torch thread per CPU, and one OpenCV thread, so they do not fight."""
+    import os
+
+    import cv2
+    import torch
+
+    count = max(1, os.cpu_count() or 1)
+    torch.set_num_threads(count)
+    try:
+        torch.set_num_interop_threads(1)
+    except RuntimeError:
+        pass
+    cv2.setNumThreads(1)
+
+
 class YoloDetector:
     """One loaded Ultralytics model. Instances are cached per weights path."""
 
     _cache: dict[str, YoloDetector] = {}
+    _threads_ready = False
 
     def __init__(self, spec: ModelSpec) -> None:
         from ultralytics import YOLO
 
+        if not YoloDetector._threads_ready:
+            configure_cpu_threads()
+            YoloDetector._threads_ready = True
         self.spec = spec
         self.model = YOLO(str(spec.weights))
         self.fallback = spec.fallback_roles()
@@ -147,7 +167,12 @@ class YoloDetector:
             )
         key = str(spec.weights.resolve())
         cached = cls._cache.get(key)
-        if cached is None or cached.spec.name != spec.name or cached.spec.roles != spec.roles:
+        if (
+            cached is None
+            or cached.spec.name != spec.name
+            or cached.spec.roles != spec.roles
+            or cached.spec.image_size != spec.image_size
+        ):
             cached = cls(spec)
             cls._cache[key] = cached
         return cached

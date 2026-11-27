@@ -30,6 +30,27 @@ def _wait(settings, session_id: str, timeout: float = 6):
     return row
 
 
+def test_running_session_reports_stage_and_percent(settings):
+    from bowlinger.db import ensure_user, init_db, insert_session, set_session_progress
+    from bowlinger.sessions import public_session
+
+    init_db(settings.db_path)
+    ensure_user(settings.db_path, "coach_1")
+    insert_session(
+        settings.db_path,
+        session_id="prog",
+        user_id="coach_1",
+        source="upload",
+        original_name="clip.mp4",
+        video_path="/tmp/missing.mp4",
+        video_bytes=1,
+    )
+    set_session_progress(settings.db_path, "prog", "Detecting players, ball and stumps", 40)
+    body = public_session(get_session(settings.db_path, "prog"))
+    assert body["status"] == "queued"
+    assert body["progress"] == {"stage": "Detecting players, ball and stumps", "percent": 40}
+
+
 def test_background_upload_reaches_completed_without_a_pitch(settings, tmp_path):
     settings.sync_jobs = False
     clip = tmp_path / "bowl.mp4"

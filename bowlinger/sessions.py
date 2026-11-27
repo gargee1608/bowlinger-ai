@@ -42,6 +42,7 @@ def public_session(row: dict) -> dict:
         "error": row["error"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "progress": json.loads(row["progress_json"]) if row.get("progress_json") else None,
         "result": result,
     }
 

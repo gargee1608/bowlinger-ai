@@ -145,6 +145,18 @@ function showSession(payload) {
   const next = `/s/${payload.session_id}`;
   if (location.pathname !== next) history.replaceState(null, "", next);
   setStatus(payload.status);
+  const progressLine = document.querySelector("#progress-line");
+  if (progressLine) {
+    if (payload.status === "running") {
+      const progress = payload.progress;
+      progressLine.hidden = false;
+      progressLine.textContent = progress
+        ? `${progress.stage} — ${progress.percent}%`
+        : "Starting analysis…";
+    } else {
+      progressLine.hidden = true;
+    }
+  }
   jobError.hidden = !payload.error;
   jobError.textContent = payload.error || "";
   renderResult(payload.result);

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -84,6 +85,8 @@ def init_db(db_path: Path) -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
         if "overrides_json" not in columns:
             conn.execute("ALTER TABLE sessions ADD COLUMN overrides_json TEXT")
+        if "progress_json" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN progress_json TEXT")
 
 
 def create_job(db_path: Path, session_id: str) -> str:
@@ -267,6 +270,15 @@ def get_session(db_path: Path, session_id: str) -> dict | None:
     with connect(db_path) as conn:
         row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
     return dict(row) if row else None
+
+
+def set_session_progress(db_path: Path, session_id: str, stage: str | None, percent: int | None) -> None:
+    payload = None if stage is None else json.dumps({"stage": stage, "percent": int(percent or 0)})
+    with connect(db_path) as conn:
+        conn.execute(
+            "UPDATE sessions SET progress_json = ?, updated_at = ? WHERE id = ?",
+            (payload, utcnow(), session_id),
+        )
 
 
 def set_session_status(

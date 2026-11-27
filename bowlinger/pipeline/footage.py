@@ -64,13 +64,12 @@ def _is_bowler(box, height: int) -> bool:
     return (y2 - y1) > 130 and y2 > 0.70 * height
 
 
-def _motion_series(path: Path, settings: Settings):
+def _motion_series(path: Path, settings: Settings, progress=None):
     detector = YoloDetector.for_settings(settings)
     capture = cv2.VideoCapture(str(path))
     fps = float(capture.get(cv2.CAP_PROP_FPS) or 30)
     width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    grays: list[np.ndarray] = []
     boxes_at: dict[int, dict[str, list[tuple[float, float, float, float]]]] = {}
     role_points: dict[str, list[dict]] = {"ball": [], "bat": [], "stumps": []}
     early_stumps: list[dict] = []
@@ -83,11 +82,23 @@ def _motion_series(path: Path, settings: Settings):
         "gloves": [],
     }
     index = 0
+    previous_even = None
+    last_striker = None
+    last_bowler = None
+    striker_motion: list[tuple[float, float, float]] = []
+    bowler_speed: list[tuple[float, float]] = []
+    striker_boxes: list[tuple[float, float, float, float, float]] = []
+    recent_grays: dict[int, np.ndarray] = {}
+    movement_times: list[float] = []
+    expanded_stumps = None
+    total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if progress:
+        progress("Detecting players, ball and stumps", 1)
     while True:
         ok, frame = capture.read()
         if not ok:
             break
-        grays.append(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         if index % 2 == 0:
             grouped = detector.detect(frame)
             # Even a dedicated batsman class can also fire on the bowler. Keep the
@@ -132,72 +143,64 @@ def _motion_series(path: Path, settings: Settings):
                         role_samples[role].append(
                             {"frame": index, "box": [float(box[0]), float(box[1]), float(box[2]), float(box[3])]}
                         )
-        elif index < 5:
-            # The tracker samples every second frame. Stumps still use all of the first five.
-            grouped_odd = detector.detect(frame)
-            for box in _boxes(grouped_odd.get("stumps", [])):
-                early_stumps.append({"frame": index, "box": [float(box[0]), float(box[1]), float(box[2]), float(box[3])]})
-            if not grouped_odd.get("stumps"):
-                for stump in detect_stumps(frame):
-                    early_stumps.append(
-                        {
-                            "frame": index,
-                            "box": [
-                                stump["x"] - stump["w"] / 2,
-                                stump["y"] - stump["h"] / 2,
-                                stump["x"] + stump["w"] / 2,
-                                stump["y"] + stump["h"] / 2,
-                            ],
-                        }
-                    )
+            grouped_boxes = boxes_at[index]
+            strikers = grouped_boxes["striker"]
+            bowlers = grouped_boxes["bowler"]
+            if strikers:
+                if last_striker is not None:
+                    anchor = (last_striker[0] + last_striker[2]) / 2
+                    chosen = min(strikers, key=lambda box: abs((box[0] + box[2]) / 2 - anchor))
+                else:
+                    chosen = min(strikers, key=lambda box: box[3] - box[1])
+                if last_striker is not None:
+                    jump = abs((chosen[0] + chosen[2]) / 2 - (last_striker[0] + last_striker[2]) / 2)
+                    if jump > 90:
+                        chosen = None
+                if chosen is not None:
+                    last_striker = chosen
+                    striker_boxes.append((index / fps, *chosen))
+                    x1, y1, x2, y2 = (int(chosen[0] - 40), int(chosen[1] - 60), int(chosen[2] + 55), int(chosen[3] + 10))
+                    x1, y1 = max(0, x1), max(0, y1)
+                    x2, y2 = min(width - 1, x2), min(height - 1, y2)
+                    if previous_even is not None and x2 > x1 and y2 > y1:
+                        current = gray[y1:y2, x1:x2]
+                        previous = previous_even[y1:y2, x1:x2]
+                        if current.shape == previous.shape and current.size:
+                            diff = cv2.absdiff(current, previous)
+                            top = diff[: max(1, diff.shape[0] // 3)]
+                            top_ratio = float(top.mean()) / (float(diff.mean()) + 1e-6)
+                            striker_motion.append((index / fps, float(diff.mean()), top_ratio))
+            if bowlers:
+                if last_bowler is not None:
+                    anchor = (last_bowler[0] + last_bowler[2]) / 2
+                    bowler = min(bowlers, key=lambda box: abs((box[0] + box[2]) / 2 - anchor))
+                    speed = (
+                        ((bowler[0] + bowler[2]) / 2 - (last_bowler[0] + last_bowler[2]) / 2) ** 2
+                        + ((bowler[1] + bowler[3]) / 2 - (last_bowler[1] + last_bowler[3]) / 2) ** 2
+                    ) ** 0.5
+                    bowler_speed.append((index / fps, speed))
+                last_bowler = bowlers[0] if last_bowler is None else bowler
+            previous_even = gray
+            if progress and total_frames and index % 30 == 0:
+                progress("Detecting players, ball and stumps", 5 + 80 * index / total_frames)
+        if index == 4:
+            expanded_stumps = lock_stump_box(early_stumps, width, height).get("expanded_box")
+        recent_grays[index] = gray
+        recent_grays.pop(index - 9, None)
+        if (
+            expanded_stumps
+            and len(movement_times) < 12
+            and index >= 8
+            and index % 8 == 0
+            and index - 8 in recent_grays
+        ):
+            x1, y1, x2, y2 = (int(value) for value in expanded_stumps)
+            diff = cv2.absdiff(recent_grays[index], recent_grays[index - 8])
+            roi = diff[max(0, y1) : max(0, y2), max(0, x1) : max(0, x2)]
+            if roi.size and float(roi.mean()) >= 6.0:
+                movement_times.append(index / fps)
         index += 1
     capture.release()
-
-    last_striker = None
-    last_bowler = None
-    striker_motion: list[tuple[float, float, float]] = []
-    bowler_speed: list[tuple[float, float]] = []
-    striker_boxes: list[tuple[float, float, float, float, float]] = []
-    for frame_index in range(0, index, 2):
-        grouped_boxes = boxes_at.get(frame_index, {"striker": [], "bowler": []})
-        strikers = grouped_boxes["striker"]
-        bowlers = grouped_boxes["bowler"]
-        if strikers:
-            if last_striker is not None:
-                anchor = (last_striker[0] + last_striker[2]) / 2
-                chosen = min(strikers, key=lambda box: abs((box[0] + box[2]) / 2 - anchor))
-            else:
-                # The striker is the smaller of the crease figures, not the bowler.
-                chosen = min(strikers, key=lambda box: box[3] - box[1])
-            # Ignore a person who has walked into the shot far from the crease.
-            if last_striker is not None:
-                jump = abs((chosen[0] + chosen[2]) / 2 - (last_striker[0] + last_striker[2]) / 2)
-                if jump > 90:
-                    chosen = None
-            if chosen is not None:
-                last_striker = chosen
-                striker_boxes.append((frame_index / fps, *chosen))
-                x1, y1, x2, y2 = (int(chosen[0] - 40), int(chosen[1] - 60), int(chosen[2] + 55), int(chosen[3] + 10))
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(width - 1, x2), min(height - 1, y2)
-                if frame_index >= 2 and x2 > x1 and y2 > y1:
-                    current = grays[frame_index][y1:y2, x1:x2]
-                    previous = grays[frame_index - 2][y1:y2, x1:x2]
-                    if current.shape == previous.shape and current.size:
-                        diff = cv2.absdiff(current, previous)
-                        top = diff[: max(1, diff.shape[0] // 3)]
-                        top_ratio = float(top.mean()) / (float(diff.mean()) + 1e-6)
-                        striker_motion.append((frame_index / fps, float(diff.mean()), top_ratio))
-        if bowlers:
-            if last_bowler is not None:
-                anchor = (last_bowler[0] + last_bowler[2]) / 2
-                bowler = min(bowlers, key=lambda box: abs((box[0] + box[2]) / 2 - anchor))
-                speed = (
-                    ((bowler[0] + bowler[2]) / 2 - (last_bowler[0] + last_bowler[2]) / 2) ** 2
-                    + ((bowler[1] + bowler[3]) / 2 - (last_bowler[1] + last_bowler[3]) / 2) ** 2
-                ) ** 0.5
-                bowler_speed.append((frame_index / fps, speed))
-            last_bowler = bowlers[0] if last_bowler is None else bowler
     return (
         fps,
         width,
@@ -206,7 +209,7 @@ def _motion_series(path: Path, settings: Settings):
         striker_motion,
         bowler_speed,
         striker_boxes,
-        grays,
+        movement_times,
         role_points,
         detector.spec,
         early_stumps,
@@ -320,16 +323,27 @@ def _release_for(contact_s: float, bowler_peaks: list[tuple[float, float]]) -> f
     return best
 
 
-def _ball_track(grays, fps, contact_s, striker_box, width, height) -> list[dict]:
+def _ball_track(path, fps, contact_s, striker_box, width, height, frame_count) -> list[dict]:
     if striker_box is None:
         return []
     start = max(0, int((contact_s - 0.85) * fps))
-    end = min(len(grays) - 1, int((contact_s + 0.1) * fps))
+    end = min(frame_count - 1, int((contact_s + 0.1) * fps))
+    capture = cv2.VideoCapture(str(path))
+    capture.set(cv2.CAP_PROP_POS_FRAMES, start)
+    window = {}
+    for frame_index in range(start, end + 1):
+        ok, frame = capture.read()
+        if not ok:
+            break
+        window[frame_index] = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    capture.release()
     sx = (striker_box[0] + striker_box[2]) / 2
     sy = (striker_box[1] + striker_box[3]) / 2
     points = []
     for frame_index in range(start + 1, end):
-        diff = cv2.absdiff(grays[frame_index], grays[frame_index - 1])
+        if frame_index not in window or frame_index - 1 not in window:
+            continue
+        diff = cv2.absdiff(window[frame_index], window[frame_index - 1])
         mask = (diff > 28).astype(np.uint8) * 255
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
         contours, _hierarchy = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -438,7 +452,7 @@ def _sample_stumps(path: Path) -> list[dict]:
 
 
 @register_analyzer("footage")
-def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict) -> dict:
+def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict, progress=None) -> dict:
     from bowlinger import __version__
 
     (
@@ -449,12 +463,14 @@ def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict) -> 
         motion,
         bowler_speed,
         striker_boxes,
-        grays,
+        movement_times,
         role_points,
         model_spec,
         early_stumps,
         role_samples,
-    ) = _motion_series(path, settings)
+    ) = _motion_series(path, settings, progress)
+    if progress:
+        progress("Checking the audio", 90)
     samples, sample_rate = load_audio(path) or (np.zeros(1, dtype=np.float32), 22050)
     onset_times = []
     if samples.size > sample_rate:
@@ -464,6 +480,8 @@ def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict) -> 
             index = int(np.argmin(np.abs(times - onset)))
             if float(strength[index]) >= 5.5:
                 onset_times.append(float(onset))
+    if progress:
+        progress("Scoring deliveries", 96)
     strides = _bowler_peaks(bowler_speed)
     contacts = _contacts(motion, strides, onset_times)
     if model_spec.provides("bat") and role_points["bat"]:
@@ -501,7 +519,7 @@ def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict) -> 
             box = min(striker_boxes, key=lambda item: abs(item[0] - contact["time_s"]))[1:]
         track = _ball_from_model(role_points["ball"], fps, contact["time_s"], box)
         if len(track) < 4:
-            track = _ball_track(grays, fps, contact["time_s"], box, _width, _height)
+            track = _ball_track(path, fps, contact["time_s"], box, _width, _height, frame_count)
         shot_name = _shot_from_bat(role_points["bat"], fps, contact["time_s"], box) or contact["shot"]
         shot = "straight drive" if shot_name == "drive" else shot_name
         if shot_name == "defence":
@@ -575,7 +593,7 @@ def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict) -> 
             role_samples,
             role_points,
             strides,
-            grays,
+            movement_times,
             fps,
             _width,
             _height,
@@ -585,22 +603,7 @@ def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict) -> 
     }
 
 
-def _movement_times(grays, fps: float, outer: list[float]) -> list[float]:
-    times: list[float] = []
-    step = 8
-    x1, y1, x2, y2 = (int(value) for value in outer)
-    for index in range(step, len(grays), step):
-        diff = cv2.absdiff(grays[index], grays[index - step])
-        roi = diff[max(0, y1) : max(0, y2), max(0, x1) : max(0, x2)]
-        if roi.size == 0 or float(roi.mean()) < 6.0:
-            continue
-        times.append(index / fps)
-        if len(times) >= 12:
-            break
-    return times
-
-
-def _footage_geometry(early_stumps, role_samples, role_points, strides, grays, fps, width, height, deliveries, audio_present):
+def _footage_geometry(early_stumps, role_samples, role_points, strides, movement_times, fps, width, height, deliveries, audio_present):
     stumps = lock_stump_box(early_stumps, width, height)
     people = []
     for sample in role_samples.get("batsman", [])[:1]:
@@ -635,9 +638,7 @@ def _footage_geometry(early_stumps, role_samples, role_points, strides, grays, f
         )
     bat_boxes = [point["box"] for point in role_points.get("bat", [])[:6] if point.get("box")]
     roles = classify_roles(people, stumps.get("box"), bat_boxes)
-    movement = {"samples": 0, "active_frames": 0, "times_s": []}
-    if stumps.get("expanded_box"):
-        movement = movement_summary(_movement_times(grays, fps, stumps["expanded_box"]))
+    movement = movement_summary(movement_times)
     batsman_frame = None if roles.get("batsman") is None else roles["batsman"].get("frame")
     for delivery in deliveries:
         release_frame = delivery.get("release_frame")
