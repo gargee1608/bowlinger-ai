@@ -39,7 +39,7 @@ Port **8741** is published on `0.0.0.0`. Uploaded videos and the SQLite database
 | Box training | `/train` |
 | Audio training | `/train/audio` |
 
-The history and training pages use `BOWLINGER_ADMIN_PASSWORD`. Leave it unset and those pages stay closed.
+The history and training pages are open unless `BOWLINGER_ADMIN_PASSWORD` is set. A set password asks for that password.
 
 ## Upload a video
 

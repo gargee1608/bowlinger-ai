@@ -1,8 +1,9 @@
 """A single shared password for the admin and training pages.
 
 The password comes from BOWLINGER_ADMIN_PASSWORD. It is not stored in the
-database. A matching login sets an HttpOnly cookie that is an HMAC of that
-password, so the check does not keep a server-side session.
+database. When it is unset or blank, those pages and their APIs are open.
+When it is set, a matching login sets an HttpOnly cookie that is an HMAC of
+that password, so the check does not keep a server-side session.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ _PURPOSE = b"bowlinger-admin-v1"
 
 
 def admin_configured(settings: Settings) -> bool:
-    return bool(settings.admin_password)
+    return bool(settings.admin_password.strip())
 
 
 def password_matches(settings: Settings, presented: str) -> bool:

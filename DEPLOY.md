@@ -32,7 +32,7 @@ docker compose up -d --build
 
 Open `http://BALU-001:8741` from a machine that can reach the server, or `http://127.0.0.1:8741` on the server itself.
 
-Set a password before anyone opens the history or training pages. Compose reads it from the environment. It is not written into the database.
+History and training are open when `BOWLINGER_ADMIN_PASSWORD` is unset or empty. Set it to require a password. Compose reads it from the environment. It is not written into the database.
 
 ```bash
 export BOWLINGER_ADMIN_PASSWORD='choose-a-password'

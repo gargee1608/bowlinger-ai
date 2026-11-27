@@ -59,7 +59,7 @@ class Settings:
     detector: str = "auto"
     model_config: Path | None = None
     model_name: str = ""
-    # Empty means the admin and training pages stay closed.
+    # Empty means admin history and the training pages are open.
     admin_password: str = ""
 
     @classmethod

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import cv2
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from bowlinger import __version__
@@ -218,7 +218,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/admin/login")
     def admin_login(response: Response, password: str = Form(...)) -> dict:
         if not admin_configured(settings):
-            raise HTTPException(status_code=503, detail="Set BOWLINGER_ADMIN_PASSWORD before using this page")
+            return {"ok": True, "open": True}
         if not password_matches(settings, password):
             raise HTTPException(status_code=401, detail="Wrong password")
         response.set_cookie(
@@ -353,18 +353,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 def _require_admin(settings: Settings, request: Request) -> None:
     if not admin_configured(settings):
-        raise HTTPException(status_code=503, detail="Set BOWLINGER_ADMIN_PASSWORD before using this page")
+        return
     if not cookie_matches(settings, request.cookies.get(COOKIE_NAME)):
         raise HTTPException(status_code=401, detail="Admin password required")
 
 
 def _gated_page(settings: Settings, request: Request, filename: str):
-    if not admin_configured(settings):
-        return HTMLResponse(
-            "<main><h1>BOWLINGER</h1><p>Set BOWLINGER_ADMIN_PASSWORD before opening this page.</p></main>",
-            status_code=503,
-        )
-    if not cookie_matches(settings, request.cookies.get(COOKIE_NAME)):
+    if admin_configured(settings) and not cookie_matches(settings, request.cookies.get(COOKIE_NAME)):
         return FileResponse(STATIC_DIR / "login.html")
     return FileResponse(STATIC_DIR / filename)
 

@@ -185,6 +185,31 @@ def test_youtube_session_does_not_store_the_url(settings, tmp_path, monkeypatch)
     assert rejected.status_code == 400
 
 
+def test_admin_and_training_are_open_when_the_password_is_unset(settings):
+    assert settings.admin_password == ""
+    with TestClient(create_app(settings)) as client:
+        history = client.get("/api/admin/sessions")
+        assert history.status_code == 200
+        assert history.json()["sessions"] == []
+        for path, marker in (
+            ("/admin/history", b"Save history"),
+            ("/train", b"Mark the frame"),
+            ("/train/audio", b"Hit or miss"),
+        ):
+            page = client.get(path)
+            assert page.status_code == 200
+            assert marker in page.content
+            assert b"Password" not in page.content
+        saved = client.post(
+            "/api/train/annotations",
+            json={"kind": "audio", "video_ref": "open", "audio_marks": [{"time_s": 1.0, "label": "miss", "frame": 30}]},
+        )
+        assert saved.status_code == 201
+        listed = client.get("/api/train/annotations")
+        assert listed.status_code == 200
+        assert listed.json()["annotations"][0]["id"] == saved.json()["id"]
+
+
 def test_admin_history_and_training_export(settings, tmp_path):
     settings.admin_password = "net-pass"
     clip = tmp_path / "bowl.mp4"

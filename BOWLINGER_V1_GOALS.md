@@ -176,8 +176,8 @@ The cricket model classes are ball, bat, batsman, bowler, fielder, gloves, pads,
 
 ## GJ – Save history
 - [x] `/admin/history` lists sessions newest first, with a video URL and a link to `/s/<session id>`.
-- [x] `/admin`, `/admin/history`, `/train`, and `/train/audio` ask for `BOWLINGER_ADMIN_PASSWORD`.
-- [x] The password is documented in `DEPLOY.md`. An empty password leaves the pages closed.
+- [x] `/admin`, `/admin/history`, `/train`, and `/train/audio` ask for `BOWLINGER_ADMIN_PASSWORD` when it is set. When it is unset or empty, those pages and their APIs are open.
+- [x] The password is documented in `DEPLOY.md`. An empty password leaves the pages open.
 - [x] Test: a wrong password is rejected; the history row links to `/s/<id>`.
 
 ---
