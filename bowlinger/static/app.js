@@ -92,6 +92,7 @@ uploadForm.addEventListener("submit", async (event) => {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.detail || "Upload failed");
     remember(payload);
+    keepDrawing = false;
     showSession(payload);
     poll(payload.session_id);
   } catch (error) {
@@ -147,12 +148,19 @@ function showSession(payload) {
   setStatus(payload.status);
   const progressLine = document.querySelector("#progress-line");
   if (progressLine) {
-    if (payload.status === "running") {
+    const moving = payload.status === "running" || payload.status === "queued";
+    if (moving && !payload.result) {
       const progress = payload.progress;
       progressLine.hidden = false;
       progressLine.textContent = progress
         ? `${progress.stage} — ${progress.percent}%`
-        : "Starting analysis…";
+        : "Starting analysis… — 0%";
+    } else if (payload.status === "running") {
+      const progress = payload.progress;
+      progressLine.hidden = false;
+      progressLine.textContent = progress
+        ? `${progress.stage} — ${progress.percent}%`
+        : "Starting analysis… — 0%";
     } else {
       progressLine.hidden = true;
     }
@@ -183,11 +191,15 @@ function poll(sessionId) {
 const initial = sessionFromLocation();
 if (initial) openSession(initial);
 
+let keepDrawing = false;
+
 function renderResult(result) {
   resultEl.replaceChildren();
   if (!result) {
-    const panel = document.querySelector("#draw-panel");
-    if (panel) panel.hidden = true;
+    if (!keepDrawing) {
+      const panel = document.querySelector("#draw-panel");
+      if (panel) panel.hidden = true;
+    }
     return;
   }
   const video = result.video;
@@ -391,8 +403,16 @@ function strokeBox(context, box, color) {
   context.strokeRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
 }
 
+function errorText(payload, fallback) {
+  const detail = payload && payload.detail;
+  if (typeof detail === "string" && detail) return detail;
+  return fallback;
+}
+
 async function saveMarks(rerun) {
   drawError.hidden = true;
+  const saved = document.querySelector("#draw-saved");
+  if (saved) saved.hidden = true;
   const body = {};
   if (stumpBox) body.stumps = stumpBox;
   if (pitchEditor.points.length >= 3) {
@@ -401,8 +421,24 @@ async function saveMarks(rerun) {
     paintDraw();
   } else if (pitchEditor.points.length) {
     drawError.hidden = false;
-    drawError.textContent = "The pitch needs at least three points before it can close.";
+    drawError.textContent = "Draw at least 3 points";
     return;
+  } else if (rerun && !stumpBox) {
+    drawError.hidden = false;
+    drawError.textContent = "Draw at least 3 points";
+    return;
+  }
+  const button = document.querySelector(rerun ? "#analyse-marks" : "#save-marks");
+  if (button) button.disabled = true;
+  if (rerun) {
+    keepDrawing = true;
+    setStatus("running");
+    const progressLine = document.querySelector("#progress-line");
+    if (progressLine) {
+      progressLine.hidden = false;
+      progressLine.textContent = "Starting analysis… — 0%";
+    }
+    resultEl.replaceChildren();
   }
   const path = rerun ? "analyse" : "marks";
   try {
@@ -411,12 +447,24 @@ async function saveMarks(rerun) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.detail || "Could not save the pitch");
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(errorText(payload, rerun ? "Could not start analysis" : "Could not save the boxes"));
     showSession(payload);
-    if (rerun && (payload.status === "queued" || payload.status === "running")) poll(payload.session_id);
+    if (rerun) {
+      if (payload.status === "completed" || payload.status === "failed") return;
+      poll(payload.session_id);
+      return;
+    }
+    if (saved) {
+      saved.hidden = false;
+      saved.textContent = body.pitch_polygon
+        ? "Saved the stump box and pitch area."
+        : "Saved the stump box.";
+    }
   } catch (error) {
     drawError.hidden = false;
-    drawError.textContent = error.message;
+    drawError.textContent = error.message || "Could not start analysis";
+  } finally {
+    if (button) button.disabled = false;
   }
 }

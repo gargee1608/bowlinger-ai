@@ -24,6 +24,7 @@ from bowlinger.db import (
     list_sessions,
     list_user_sessions,
     set_session_overrides,
+    set_session_progress,
     set_session_status,
 )
 from bowlinger.jobs import JobQueue
@@ -213,7 +214,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Session not found")
         marks = _marks_from_payload(payload)
         set_session_overrides(settings.db_path, session_id, _merged_overrides(row.get("overrides_json"), marks))
-        set_session_status(settings.db_path, session_id, "queued", error=None)
+        set_session_status(settings.db_path, session_id, "queued", error=None, clear_result=True)
+        set_session_progress(settings.db_path, session_id, "Starting", 0)
         queue.enqueue(session_id)
         fresh = get_session(settings.db_path, session_id)
         return public_session(fresh or row)

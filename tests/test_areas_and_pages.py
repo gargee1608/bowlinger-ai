@@ -2,6 +2,7 @@
 
 import io
 import json
+import time
 import zipfile
 from pathlib import Path
 
@@ -382,3 +383,53 @@ def test_pitch_polygon_is_saved_and_loaded(settings, tmp_path):
         assert body["result"]["geometry"]["stumps"]["source"] == "manual"
         again = client.get(f"/api/sessions/{session_id}")
         assert again.json()["result"]["geometry"]["pitch"]["polygon"] == polygon
+
+
+def test_analyse_button_reruns_and_reports_progress(settings, tmp_path):
+    """A completed session must leave 'completed' as soon as Analysis is clicked."""
+    settings.sync_jobs = False
+    clip = tmp_path / "bowl.mp4"
+    write_clip(clip, ClipSpec(shot="defence", hold_frames=0, pre_frames=4, post_frames=2))
+    polygon = [[30, 40], [200, 50], [180, 220], [80, 260], [20, 140]]
+    app = create_app(settings)
+    original = app.state.queue.handler
+    calls = {"n": 0}
+
+    def handler(job):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            time.sleep(0.4)
+        original(job)
+
+    app.state.queue.handler = handler
+    try:
+        with TestClient(app) as client:
+            with clip.open("rb") as handle:
+                uploaded = client.post(
+                    "/api/sessions",
+                    files={"video": ("bowl.mp4", handle, "video/mp4")},
+                    data={"user_key": "coach_1"},
+                )
+            session_id = uploaded.json()["session_id"]
+            deadline = time.time() + 8
+            body = uploaded.json()
+            while time.time() < deadline and body["status"] not in {"completed", "failed"}:
+                time.sleep(0.05)
+                body = client.get(f"/api/sessions/{session_id}").json()
+            assert body["status"] == "completed"
+            started = client.post(f"/api/sessions/{session_id}/analyse", json={"pitch_polygon": polygon})
+            assert started.status_code == 200
+            running = started.json()
+            assert running["status"] in {"queued", "running"}
+            assert running["result"] is None
+            assert running["progress"]["stage"] == "Starting"
+            assert running["progress"]["percent"] == 0
+            deadline = time.time() + 8
+            while time.time() < deadline and running["status"] not in {"completed", "failed"}:
+                time.sleep(0.05)
+                running = client.get(f"/api/sessions/{session_id}").json()
+            assert running["status"] == "completed", running.get("error")
+            assert running["result"]["geometry"]["pitch"]["polygon"] == polygon
+            assert running["result"]["geometry"]["pitch"]["fixed"] is True
+    finally:
+        app.state.queue.stop()

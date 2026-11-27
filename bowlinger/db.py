@@ -288,8 +288,19 @@ def set_session_status(
     *,
     error: str | None = None,
     result_json: str | None = None,
+    clear_result: bool = False,
 ) -> None:
     with connect(db_path) as conn:
+        if clear_result:
+            conn.execute(
+                """
+                UPDATE sessions
+                SET status = ?, error = ?, result_json = NULL, updated_at = ?
+                WHERE id = ?
+                """,
+                (status, error, utcnow(), session_id),
+            )
+            return
         conn.execute(
             """
             UPDATE sessions
