@@ -4,7 +4,7 @@ The active entry is `BOWLINGER_MODEL`, or the file's `active` key.
 Weights are resolved next to the config file. A later cricket model is a new
 `.pt` in `models/` plus a class map in that JSON. No code change.
 
-Roles the pipeline understands: person, batsman, bowler, bat, ball, stumps.
+Roles the pipeline understands: person, batsman, bowler, fielder, wicketkeeper, bat, ball, stumps, pads, gloves.
 `person` is split into batsman and bowler by where the box sits.
 Any role the active map does not name is left for the classic fallback.
 """

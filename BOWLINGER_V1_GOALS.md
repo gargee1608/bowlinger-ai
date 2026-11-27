@@ -3,9 +3,9 @@
 > **Single source of truth** for V1 scope and progress.
 > Status legend: `[ ]` Not started · `[/]` In progress · `[x]` Completed (only after successful testing)
 
-**Last updated:** 2026-11-25
-**Current stage:** `models/cricket.pt` is the default real-footage model. Labelled contact times pass. Shot names, the ball track, and runs do not.
-**Next goal to work on:** G2 and G5. The fine-tune sees the ball in the Roboflow set (mAP50 0.725) but not reliably in these phone clips, and the shot name does not match the labels.
+**Last updated:** 2026-11-27
+**Current stage:** YouTube input, a fixed stump box, pitch and role rules, training pages, and the admin history page are in the app. The phone clips still do not show a reliable ball track, so a release is not accepted unless the path moves toward the stumps or the user marks it.
+**Next goal to work on:** G2. The ball in `Sample/sample_01.mp4` and `sample_02.mp4` is still too small for a trusted trajectory.
 
 ---
 
@@ -36,9 +36,9 @@
 
 ## V1 Scope
 
-**In scope:** pre-video analysis & quality check, offline upload/analysis sessions, anonymous demo mode, ball release detection, ball detection & tracking, bat/batsman detection, bat-ball contact detection, shot identification, virtual run calculation.
+**In scope:** pre-video analysis & quality check, offline upload/analysis sessions, a YouTube link analysed like an upload, anonymous demo mode, a fixed stump box and an optional pitch box, role labels (batsman, bowler, fielder, wicketkeeper, bat, ball, stumps), ball release detection, ball detection & tracking, bat/batsman detection, bat-ball contact detection, shot identification, virtual run calculation, a training page, an audio training page, and a password-protected save-history page.
 
-**Out of scope for V1:** bowling speed, line & length / pitch maps, fielder tracking, player stats, LBW/DRS, live streaming, multi-camera fusion (unless approved).
+**Out of scope for V1:** bowling speed, line & length maps beyond the user-drawn pitch box, player stats, LBW/DRS, live streaming, multi-camera fusion (unless approved).
 
 ---
 
@@ -122,6 +122,64 @@
 - [x] Display estimated runs for each delivery (overlay / output). The session JSON and the results screen show runs per delivery. Checked in the browser on a synthetic demo.
 - [/] Test: estimated runs vs. labelled expected runs. No labelled real runs. Not upgraded.
 
+The carry-based `virtual_runs` number above is unchanged. A separate outcome run is 1 for a hit, and 0 for a miss or a dead ball. See G4.
+
+## GE – YouTube input
+- [x] A URL field in the browser. The home page posts to `POST /api/sessions/youtube`.
+- [x] The server downloads the video with yt-dlp and analyses it like an upload. The download function is in `bowlinger/youtube.py`. A live YouTube fetch was not run in this environment; the test uses a stand-in file.
+- [x] The URL is not saved in a file. The session stores the video title only. `tests/test_areas_and_pages.py`.
+- [x] Test: a rejected non-YouTube link, and a download that leaves no copy of the URL on disk.
+
+## GA – Stump lock (added)
+- [x] Detect and label stumps in the first 5 frames, then keep one fixed box for the whole video. Later sightings do not move it. `lock_stump_box`.
+- [x] If those frames have no stump, show the first frame and let the user draw the box. That drawing is the reference. `POST /api/sessions/{id}/marks`. The phone clips did lock a box, so they did not open this fallback. The API test covers a drawn box.
+- [x] Derive a larger stump area, expanded on all four sides, and track movement inside it. Both phone clips recorded movement samples.
+- [x] Test: the lock ignores a later box; a missing detection asks for a drawing; both phone clips keep one fixed box. `sample_01` locked the near sticks at the bottom of the frame. `sample_02` locked a small box. One box is kept, not two wickets.
+
+## GF – Pitch area and dead ball
+- [x] The user can draw a box around the pitch. It is the area for players, the ball, the bat, and bowling events. `POST /api/sessions/{id}/marks`.
+- [x] A ball that moves outside that box is a dead ball. A hit inside the box stays a hit. Tested with points, not with a pitch drawn on the phone clips.
+- [x] If bowling events are missing, expand the pitch once and look again.
+- [x] Test: a point outside the box is a dead ball; a found event does not expand the box. The phone clips had no pitch box, so nothing on them was called a dead ball.
+
+## GG – Who is who
+The cricket model classes are ball, bat, batsman, bowler, fielder, gloves, pads, stumps, and wicket-keeper. A class is used when the model has it. The rules below fill the rest.
+- [x] The batsman is a person with a bat, near the locked stumps. That check runs before the ball-release flag. `sample_01` did not confirm a batsman: the locked box is the near sticks, and the striker is at the other end. `sample_02` did confirm one. The older "batsman on crease" flag is unchanged.
+- [x] The bowler is the person with a bowling action. Both phone clips report a bowler. A class label without the action is not used.
+- [x] A fielder has no pads and no gloves. The rule is tested. The phone clips list fielder boxes the model fired; they are not confirmed people.
+- [/] The wicketkeeper is behind the stumps, by position and by gloves or the keeper class. The rule is tested on a drawn box. Neither phone clip produced a keeper.
+- [x] Test: the rules on drawn boxes, and both phone clips record the roles the model returned.
+
+## G1 – Release rule (added)
+- [x] A release counts only when the ball's trajectory moves toward the stumps. `sample_01`'s three deliveries were not accepted. `sample_02` accepted some tracks; the labels still say the ball was not resolved, so those accepts are not treated as a real ball.
+- [x] If the model cannot see the release, the user can mark the frame. A manual frame is stored. The outcome waits for three points.
+- [x] Keep one ball identity, fill missing detections from the frames on either side, and do not decide a trajectory outcome until there are at least 3 ball points after release.
+- [x] Test: a path that approaches the stumps is accepted; a path that leaves them is not; a one-point manual mark is stored but not decided. The old stride time in `release_time_s` is kept. The labelled sample_01 releases still match within 0.6 s.
+
+## G4 – Outcome runs (added)
+- [x] When a ball is delivered and the clip has audio, the audio check runs. Both phone clips have audio, and each delivery stores `audio_confirmation`.
+- [x] Hit (a video contact that is not a dead ball) = 1 outcome run. Miss = 0. Dead ball = 0. On these clips every emitted delivery is a video hit, so the miss row was not seen in the phone footage. The miss and dead-ball numbers are covered by the unit test.
+- [x] The existing carry-based `virtual_runs` is still calculated and still shown. `tests/test_g6_runs.py`. The labelled block on sample_01 stays 0 carry runs and is also outcome run 1, because a hit and a block are different numbers.
+- [x] Test: the three outcome numbers, and both phone clips keep a hit on a video contact. Labelled contact times still match within 0.5 s. Extra contacts on sample_02 remain.
+
+## GH – Box training page
+- [x] `/train` can mark stumps, pitch, batsman, bowler, fielder, wicketkeeper, bat, and ball, plus the release frame and the contact frame.
+- [x] A saved annotation replaces what the model said for that frame. It does not retrain the weights.
+- [x] Annotations store the frame number and the timestamp.
+- [x] Export is YOLO label files (`class x y w h`) plus the event list.
+- [x] Test: a saved ball box exports as class 0. The page itself was not clicked in a browser in this run.
+
+## GI – Audio training page
+- [x] `/train/audio` asks for a waveform and a spectrogram, and plays the session video.
+- [x] The user marks a timestamp as hit or miss. The mark stores the timestamp and the matching frame.
+- [x] Test: the waveform endpoint returns peaks for a saved session, and an audio annotation saves. The spectrogram image and playback were not opened in a browser in this run.
+
+## GJ – Save history
+- [x] `/admin/history` lists sessions newest first, with a video URL and a link to `/s/<session id>`.
+- [x] `/admin`, `/admin/history`, `/train`, and `/train/audio` ask for `BOWLINGER_ADMIN_PASSWORD`.
+- [x] The password is documented in `DEPLOY.md`. An empty password leaves the pages closed.
+- [x] Test: a wrong password is rejected; the history row links to `/s/<id>`.
+
 ---
 
 ## Completed Features
@@ -136,8 +194,10 @@
 
 ## Pending Features
 - Label the real clips delivery by delivery (release frame, hit or miss, shot, runs).
-- G1 bowler and bowling-arm release. Not started.
-- G1–G3, G5 and G6 accuracy on real footage. The ball, the far wooden stumps, the striker in whites, and the bat are not reliably detected in these two phone clips.
+- G1 on real footage. The new rule rejects a release that does not move toward the stumps. sample_01's three stride times still match, and none of those ball tracks were accepted. sample_02 accepted some tracks even though the labels say the ball was not visible.
+- A wicketkeeper was not found on either phone clip.
+- sample_01's batsman is not "near" the locked near-stump box, so the new batsman label is no. The older crease flag is still yes.
+- G2, G3, G5 and G6 accuracy on real footage. The ball, the far wooden stumps, and the bat are not reliably detected in these two phone clips. sample_02 still emits extra contacts.
 - A second yellow upright on the near wicket in `sample_01` (one yellow stick is found, one is not).
 - Approval of the open decisions below.
 
@@ -154,6 +214,9 @@ Both files are portrait phone video of a practice net, with audio. They are not 
 
 ### Other limits
 - Synthetic clips use flat colours, a frontal zoom, and a ball drawn larger than a real cricket ball. They prove the pipeline logic. They do not prove nets or match accuracy.
+- The stump lock keeps one box from the first five frames. On sample_01 that is the near yellow and blue sticks, low in the portrait frame. The far wicket is not a second locked box. The expanded area is that box grown by half its size on every side. Movement inside it is a sample of frame-difference times, not a tracked person.
+- A YouTube analysis was tested with a stand-in file. yt-dlp is installed, and a live YouTube download was not run here.
+- The training pages save boxes and hit/miss marks. They do not train a new `.pt`.
 - `models/cricket.pt` is a YOLO11n fine-tune (8 epochs, imgsz 960, CPU) of Roboflow Universe jignesh-workspace/cricket-object-detection-qnjwo v2, CC BY 4.0. Validation: mAP50 0.688, mAP50-95 0.496. Per class mAP50: ball 0.725, bat 0.636, batsman 0.825, bowler 0.877, stumps 0.617, stump-bails 0.000. The images are not in git. The phone clips are a different look from that set, so the ball and the far bat are still mostly missed.
 - Practice stumps in `sample_01` are yellow and blue. White-only detection counted floodlit specks, so a wicket now has to be two or three uprights seen for most of the clip. Wooden stumps on `sample_02` still fail.
 - Tracks that last longer than 2.5 s, crawl, or never reach a detected wicket are dropped. That removed the long false tracks. It does not create a real ball track.

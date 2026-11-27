@@ -19,6 +19,13 @@ import numpy as np
 
 from bowlinger.config import Settings
 from bowlinger.media import load_audio
+from bowlinger.pipeline.areas import (
+    attach_delivery_rules,
+    batsman_confirmed_before,
+    classify_roles,
+    lock_stump_box,
+    movement_summary,
+)
 from bowlinger.pipeline.audio import inspect_audio
 from bowlinger.pipeline.detect import detect_stumps, iter_frames
 from bowlinger.pipeline.preanalysis import wicket_uprights
@@ -66,6 +73,15 @@ def _motion_series(path: Path, settings: Settings):
     grays: list[np.ndarray] = []
     boxes_at: dict[int, dict[str, list[tuple[float, float, float, float]]]] = {}
     role_points: dict[str, list[dict]] = {"ball": [], "bat": [], "stumps": []}
+    early_stumps: list[dict] = []
+    role_samples: dict[str, list[dict]] = {
+        "batsman": [],
+        "bowler": [],
+        "fielder": [],
+        "wicketkeeper": [],
+        "pads": [],
+        "gloves": [],
+    }
     index = 0
     while True:
         ok, frame = capture.read()
@@ -91,7 +107,47 @@ def _motion_series(path: Path, settings: Settings):
                             "y": (box[1] + box[3]) / 2,
                             "w": box[2] - box[0],
                             "h": box[3] - box[1],
-                            "box": box,
+                            "box": [float(box[0]), float(box[1]), float(box[2]), float(box[3])],
+                        }
+                    )
+            if index < 5:
+                stump_boxes = _boxes(grouped.get("stumps", []))
+                if not stump_boxes:
+                    for stump in detect_stumps(frame):
+                        stump_boxes.append(
+                            (
+                                stump["x"] - stump["w"] / 2,
+                                stump["y"] - stump["h"] / 2,
+                                stump["x"] + stump["w"] / 2,
+                                stump["y"] + stump["h"] / 2,
+                            )
+                        )
+                for box in stump_boxes:
+                    early_stumps.append(
+                        {"frame": index, "box": [float(box[0]), float(box[1]), float(box[2]), float(box[3])]}
+                    )
+            for role in role_samples:
+                for box in _boxes(grouped.get(role, []))[:2]:
+                    if len(role_samples[role]) < 8:
+                        role_samples[role].append(
+                            {"frame": index, "box": [float(box[0]), float(box[1]), float(box[2]), float(box[3])]}
+                        )
+        elif index < 5:
+            # The tracker samples every second frame. Stumps still use all of the first five.
+            grouped_odd = detector.detect(frame)
+            for box in _boxes(grouped_odd.get("stumps", [])):
+                early_stumps.append({"frame": index, "box": [float(box[0]), float(box[1]), float(box[2]), float(box[3])]})
+            if not grouped_odd.get("stumps"):
+                for stump in detect_stumps(frame):
+                    early_stumps.append(
+                        {
+                            "frame": index,
+                            "box": [
+                                stump["x"] - stump["w"] / 2,
+                                stump["y"] - stump["h"] / 2,
+                                stump["x"] + stump["w"] / 2,
+                                stump["y"] + stump["h"] / 2,
+                            ],
                         }
                     )
         index += 1
@@ -142,7 +198,20 @@ def _motion_series(path: Path, settings: Settings):
                 ) ** 0.5
                 bowler_speed.append((frame_index / fps, speed))
             last_bowler = bowlers[0] if last_bowler is None else bowler
-    return fps, width, height, index, striker_motion, bowler_speed, striker_boxes, grays, role_points, detector.spec
+    return (
+        fps,
+        width,
+        height,
+        index,
+        striker_motion,
+        bowler_speed,
+        striker_boxes,
+        grays,
+        role_points,
+        detector.spec,
+        early_stumps,
+        role_samples,
+    )
 
 
 def _local_peaks(series: list[tuple[float, float]], gap_s: float, percentile: float) -> list[tuple[float, float]]:
@@ -372,9 +441,20 @@ def _sample_stumps(path: Path) -> list[dict]:
 def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict) -> dict:
     from bowlinger import __version__
 
-    fps, _width, _height, frame_count, motion, bowler_speed, striker_boxes, grays, role_points, model_spec = _motion_series(
-        path, settings
-    )
+    (
+        fps,
+        _width,
+        _height,
+        frame_count,
+        motion,
+        bowler_speed,
+        striker_boxes,
+        grays,
+        role_points,
+        model_spec,
+        early_stumps,
+        role_samples,
+    ) = _motion_series(path, settings)
     samples, sample_rate = load_audio(path) or (np.zeros(1, dtype=np.float32), 22050)
     onset_times = []
     if samples.size > sample_rate:
@@ -427,14 +507,18 @@ def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict) -> 
         if shot_name == "defence":
             shot = "defence"
         bat_seen = _bat_near(role_points["bat"], fps, contact["time_s"], box) or not model_spec.provides("bat")
+        release_frame = None if release is None else int(round(release * fps))
+        batsman_frames = [int(round(item[0] * fps)) for item in striker_boxes]
         deliveries.append(
             {
                 "index": number,
                 "ball_track_id": f"ball-{number}" if track else None,
                 "ball_color": "unknown",
-                "release_frame": None if release is None else int(round(release * fps)),
+                "release_frame": release_frame,
                 "release_time_s": None if release is None else round(release, 3),
                 "track_point_count": len(track),
+                "ball_points": track[:40],
+                "batsman_confirmed_before_release": batsman_confirmed_before(batsman_frames, release_frame),
                 "predicted_point_count": 0,
                 "occlusion_gaps": [],
                 "batsman_detected": striker_seen,
@@ -486,4 +570,87 @@ def analyze_footage(path: Path, settings: Settings, info: dict, audio: dict) -> 
         "preanalysis": preanalysis,
         "calibration": {"method": "none", "meters_per_pixel": None, "stump_height_px": None},
         "deliveries": deliveries,
+        "geometry": _footage_geometry(
+            early_stumps,
+            role_samples,
+            role_points,
+            strides,
+            grays,
+            fps,
+            _width,
+            _height,
+            deliveries,
+            bool(audio["present"]),
+        ),
+    }
+
+
+def _movement_times(grays, fps: float, outer: list[float]) -> list[float]:
+    times: list[float] = []
+    step = 8
+    x1, y1, x2, y2 = (int(value) for value in outer)
+    for index in range(step, len(grays), step):
+        diff = cv2.absdiff(grays[index], grays[index - step])
+        roi = diff[max(0, y1) : max(0, y2), max(0, x1) : max(0, x2)]
+        if roi.size == 0 or float(roi.mean()) < 6.0:
+            continue
+        times.append(index / fps)
+        if len(times) >= 12:
+            break
+    return times
+
+
+def _footage_geometry(early_stumps, role_samples, role_points, strides, grays, fps, width, height, deliveries, audio_present):
+    stumps = lock_stump_box(early_stumps, width, height)
+    people = []
+    for sample in role_samples.get("batsman", [])[:1]:
+        people.append({"label": "batsman", "box": sample["box"], "frame": sample["frame"], "has_pads": False, "has_gloves": False})
+    bowling = bool(strides)
+    for sample in role_samples.get("bowler", [])[:1]:
+        people.append(
+            {
+                "label": "bowler",
+                "box": sample["box"],
+                "frame": sample["frame"],
+                "bowling_action": bowling,
+                "has_pads": False,
+                "has_gloves": False,
+            }
+        )
+    for sample in role_samples.get("fielder", [])[:4]:
+        people.append({"label": "fielder", "box": sample["box"], "frame": sample["frame"], "has_pads": False, "has_gloves": False})
+    glove_boxes = [sample["box"] for sample in role_samples.get("gloves", [])]
+    for sample in role_samples.get("wicketkeeper", [])[:1]:
+        gloves = any(
+            abs((sample["box"][0] + sample["box"][2]) / 2 - (box[0] + box[2]) / 2) < 80 for box in glove_boxes
+        )
+        people.append(
+            {
+                "label": "wicketkeeper",
+                "box": sample["box"],
+                "frame": sample["frame"],
+                "has_gloves": gloves or True,
+                "has_pads": False,
+            }
+        )
+    bat_boxes = [point["box"] for point in role_points.get("bat", [])[:6] if point.get("box")]
+    roles = classify_roles(people, stumps.get("box"), bat_boxes)
+    movement = {"samples": 0, "active_frames": 0, "times_s": []}
+    if stumps.get("expanded_box"):
+        movement = movement_summary(_movement_times(grays, fps, stumps["expanded_box"]))
+    batsman_frame = None if roles.get("batsman") is None else roles["batsman"].get("frame")
+    for delivery in deliveries:
+        release_frame = delivery.get("release_frame")
+        if roles.get("batsman_confirmed") and batsman_frame is not None and release_frame is not None:
+            delivery["batsman_confirmed_before_release"] = batsman_frame < release_frame
+        else:
+            delivery["batsman_confirmed_before_release"] = bool(roles.get("batsman_confirmed") and release_frame is None)
+        attach_delivery_rules(delivery, stumps.get("box"), None, audio_present)
+    return {
+        "width": width,
+        "height": height,
+        "stumps": stumps,
+        "pitch": {"source": "unset", "box": None, "rechecked": False},
+        "movement": movement,
+        "roles": roles,
     }

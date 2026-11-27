@@ -40,6 +40,10 @@
       "roles": {
         "batsman": "batsman",
         "bowler": "bowler",
+        "fielder": ["fielder", "without-pads"],
+        "wicketkeeper": ["wicket-keeper", "wicket-keeper-gloves"],
+        "pads": "pads",
+        "gloves": ["gloves", "wicket-keeper-gloves"],
         "bat": "bat",
         "ball": "ball",
         "stumps": ["stumps", "stump- bails"]

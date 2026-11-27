@@ -61,3 +61,21 @@ def test_labelled_deliveries_are_found(settings):
             if label["expected_runs"] is not None:
                 found = _match(deliveries, label["contact_s"], "contact", TOLERANCE["contact_s"])
                 assert found["virtual_runs"] == label["expected_runs"]
+        geometry = result["geometry"]
+        stumps = geometry["stumps"]
+        assert stumps["frames_used"] == 5
+        assert stumps["source"] in {"detected", "manual", "missing"}
+        if stumps["source"] == "detected":
+            assert stumps["fixed"] is True
+            assert stumps["locked"] is True
+            assert stumps["expanded_box"] is not None
+        else:
+            assert stumps["manual_required"] is True
+        assert "movement" in geometry
+        assert "roles" in geometry
+        for row in deliveries:
+            assert row["outcome"] in {"hit", "miss", "dead_ball"}
+            assert row["outcome_runs"] == (1 if row["outcome"] == "hit" else 0)
+            assert "ball_release" in row
+            if row["outcome"] == "hit":
+                assert row["contact"]["video_detected"] is True

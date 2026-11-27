@@ -12,6 +12,7 @@ from bowlinger import __version__
 from bowlinger.config import Settings
 from bowlinger.db import get_session, set_session_status
 from bowlinger.media import probe
+from bowlinger.pipeline.areas import attach_delivery_rules, box_from_center, empty_geometry, lock_stump_box
 from bowlinger.pipeline.audio import inspect_audio
 from bowlinger.pipeline.deliveries import build_deliveries
 from bowlinger.pipeline.detect import scan_video
@@ -50,7 +51,29 @@ def analyze_classic(path: Path, settings: Settings, info: dict, audio: dict) -> 
             "stump_height_px": None if scale["stump_height_px"] is None else round(scale["stump_height_px"], 2),
         },
         "deliveries": deliveries,
+        "geometry": _classic_geometry(scan, info, deliveries, audio),
     }
+
+
+def _classic_geometry(scan: dict, info: dict, deliveries: list[dict], audio: dict) -> dict:
+    width = int(info.get("width") or 0)
+    height = int(info.get("height") or 0)
+    sightings = []
+    for stump in scan["stumps"]:
+        if stump.get("n", 0) < 2 or stump.get("h", 0) < 8:
+            continue
+        sightings.append(
+            {
+                "frame": 0,
+                "box": box_from_center(stump["x"], stump["y"], max(6.0, float(stump.get("w", 8))), float(stump["h"])),
+            }
+        )
+    stumps = lock_stump_box(sightings, width, height)
+    for delivery in deliveries:
+        attach_delivery_rules(delivery, stumps.get("box"), None, bool(audio.get("present")))
+    geometry = empty_geometry(width, height)
+    geometry["stumps"] = stumps
+    return geometry
 
 
 def _use_footage(path: Path, settings: Settings) -> bool:
