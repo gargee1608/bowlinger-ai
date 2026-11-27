@@ -202,6 +202,9 @@ function renderResult(result) {
     if (geometry && geometry.stumps) {
       const stumps = geometry.stumps;
       rows.push(["Stump box", stumps.locked ? `${stumps.source}, fixed` : "not locked — draw one"]);
+      if (stumps.manual_required) {
+        rows.push(["Next step", "Analysis finished. Draw the stump box on the first frame. Nothing is waiting in the queue."]);
+      }
       const roles = geometry.roles || {};
       rows.push(
         ["Batsman label", roles.batsman ? "yes" : "no"],

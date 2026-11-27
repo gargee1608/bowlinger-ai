@@ -48,6 +48,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lambda job: process_job(settings, job),
         sync=settings.sync_jobs,
     )
+    # Start here as well as in lifespan. A skipped ASGI lifespan still serves
+    # HTTP, and uploads would stay queued with nobody claiming jobs.
+    queue.start()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -61,7 +64,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/health")
     def health() -> dict:
-        return {"status": "ok", "service": "bowlinger", "version": __version__}
+        return {
+            "status": "ok",
+            "service": "bowlinger",
+            "version": __version__,
+            "worker": queue.alive(),
+        }
 
     @app.get("/api/config")
     def config() -> dict:

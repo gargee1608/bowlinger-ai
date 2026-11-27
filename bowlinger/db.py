@@ -113,6 +113,15 @@ def claim_next_job(db_path: Path) -> dict | None:
         return {"id": row["id"], "session_id": row["session_id"]}
 
 
+def requeue_interrupted_jobs(db_path: Path) -> int:
+    """Jobs left 'running' by a dead process will never be claimed again."""
+    with connect(db_path) as conn:
+        cur = conn.execute(
+            "UPDATE jobs SET status = 'queued', started_at = NULL WHERE status = 'running'"
+        )
+        return cur.rowcount
+
+
 def finish_job(db_path: Path, job_id: str, status: str, error: str | None = None) -> None:
     with connect(db_path) as conn:
         conn.execute(
