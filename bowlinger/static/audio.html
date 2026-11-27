@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <title>BOWLINGER — audio training</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <p class="eyebrow">Audio training</p>
+    <h1>Hit or miss</h1>
+    <nav class="nav">
+      <a href="/">Analyse</a>
+      <a href="/admin/history">Save history</a>
+      <a href="/train">Train boxes</a>
+      <a href="/train/audio">Train audio</a>
+    </nav>
+  </header>
+  <main>
+    <section class="panel">
+      <form id="open-form">
+        <label for="session-id">Session id</label>
+        <input id="session-id" required>
+        <button type="submit">Open</button>
+      </form>
+      <p class="form-error" id="audio-error" hidden></p>
+      <video id="video" controls hidden></video>
+      <img id="spectrogram" alt="Spectrogram" hidden>
+      <canvas id="wave" height="120" hidden></canvas>
+      <p class="hint" id="clock" hidden></p>
+      <div class="draw-actions">
+        <button type="button" id="mark-hit">Mark hit</button>
+        <button type="button" id="mark-miss">Mark miss</button>
+        <button type="button" id="save">Save audio marks</button>
+      </div>
+      <ul id="marks"></ul>
+      <p class="hint" id="saved" hidden></p>
+    </section>
+  </main>
+  <script>
+    const video = document.querySelector("#video");
+    const spectrogram = document.querySelector("#spectrogram");
+    const wave = document.querySelector("#wave");
+    const errorEl = document.querySelector("#audio-error");
+    const clock = document.querySelector("#clock");
+    const marksEl = document.querySelector("#marks");
+    const saved = document.querySelector("#saved");
+    let sessionId = "";
+    let marks = [];
+    let peaks = [];
+    let duration = 0;
+    let fps = 30;
+
+    document.querySelector("#open-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      errorEl.hidden = true;
+      sessionId = document.querySelector("#session-id").value.trim();
+      const session = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`);
+      const payload = await session.json().catch(() => ({}));
+      if (!session.ok) {
+        errorEl.hidden = false;
+        errorEl.textContent = payload.detail || "Session not found";
+        return;
+      }
+      fps = (payload.result && payload.result.video && payload.result.video.fps) || 30;
+      video.hidden = false;
+      video.src = `/api/sessions/${encodeURIComponent(sessionId)}/video`;
+      spectrogram.hidden = false;
+      spectrogram.src = `/api/train/spectrogram?session_id=${encodeURIComponent(sessionId)}`;
+      const waveResponse = await fetch(`/api/train/waveform?session_id=${encodeURIComponent(sessionId)}`);
+      const wavePayload = await waveResponse.json();
+      peaks = wavePayload.peaks || [];
+      duration = wavePayload.duration_s || 0;
+      wave.hidden = false;
+      wave.width = 960;
+      paint();
+      renderMarks();
+    });
+
+    video.addEventListener("timeupdate", () => {
+      clock.hidden = false;
+      const frame = Math.round(video.currentTime * fps);
+      clock.textContent = `${video.currentTime.toFixed(3)} s · frame ${frame}`;
+      paint();
+    });
+    document.querySelector("#mark-hit").addEventListener("click", () => addMark("hit"));
+    document.querySelector("#mark-miss").addEventListener("click", () => addMark("miss"));
+
+    function addMark(label) {
+      const time = Number((video.currentTime || 0).toFixed(3));
+      marks.push({ time_s: time, label, frame: Math.round(time * fps) });
+      renderMarks();
+      paint();
+    }
+    function renderMarks() {
+      marksEl.replaceChildren();
+      for (const mark of marks) {
+        const item = document.createElement("li");
+        item.textContent = `${mark.label} at ${mark.time_s} s (frame ${mark.frame})`;
+        marksEl.append(item);
+      }
+    }
+    function paint() {
+      const context = wave.getContext("2d");
+      context.clearRect(0, 0, wave.width, wave.height);
+      context.strokeStyle = "#e0b15c";
+      context.beginPath();
+      peaks.forEach((peak, index) => {
+        const x = (index / Math.max(1, peaks.length - 1)) * wave.width;
+        const y = wave.height / 2 - peak * (wave.height / 2 - 4);
+        if (index === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      });
+      context.stroke();
+      if (duration > 0) {
+        const x = (video.currentTime / duration) * wave.width;
+        context.strokeStyle = "#f3efe2";
+        context.beginPath();
+        context.moveTo(x, 0);
+        context.lineTo(x, wave.height);
+        context.stroke();
+      }
+    }
+    document.querySelector("#save").addEventListener("click", async () => {
+      const response = await fetch("/api/train/annotations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "audio", video_ref: sessionId, fps, audio_marks: marks }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        errorEl.hidden = false;
+        errorEl.textContent = payload.detail || "Save failed";
+        return;
+      }
+      saved.hidden = false;
+      saved.textContent = `Saved ${payload.id}`;
+    });
+  </script>
+</body>
+</html>

@@ -56,6 +56,31 @@ lookupForm.addEventListener("submit", (event) => {
   openSession(lookupId.value.trim());
 });
 
+const youtubeButton = document.querySelector("#youtube-button");
+const youtubeUrl = document.querySelector("#youtube-url");
+const youtubeError = document.querySelector("#youtube-error");
+
+youtubeButton.addEventListener("click", async () => {
+  youtubeError.hidden = true;
+  youtubeButton.disabled = true;
+  const body = new FormData();
+  body.set("url", youtubeUrl.value.trim());
+  if (userKeyInput.value.trim()) body.set("user_key", userKeyInput.value.trim());
+  try {
+    const response = await fetch("/api/sessions/youtube", { method: "POST", body });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "YouTube download failed");
+    remember(payload);
+    showSession(payload);
+    poll(payload.session_id);
+  } catch (error) {
+    youtubeError.hidden = false;
+    youtubeError.textContent = error.message;
+  } finally {
+    youtubeButton.disabled = false;
+  }
+});
+
 uploadForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   uploadError.hidden = true;
@@ -148,7 +173,11 @@ if (initial) openSession(initial);
 
 function renderResult(result) {
   resultEl.replaceChildren();
-  if (!result) return;
+  if (!result) {
+    const panel = document.querySelector("#draw-panel");
+    if (panel) panel.hidden = true;
+    return;
+  }
   const video = result.video;
   if (video) {
     const table = document.createElement("table");
@@ -167,6 +196,18 @@ function renderResult(result) {
         ["Ball", pre.ball_type],
         ["Batsman on crease", pre.batsman_on_crease ? "yes" : "no"],
         ["Audio present", pre.audio_present ? "yes" : "no"],
+      );
+    }
+    const geometry = result.geometry;
+    if (geometry && geometry.stumps) {
+      const stumps = geometry.stumps;
+      rows.push(["Stump box", stumps.locked ? `${stumps.source}, fixed` : "not locked — draw one"]);
+      const roles = geometry.roles || {};
+      rows.push(
+        ["Batsman label", roles.batsman ? "yes" : "no"],
+        ["Bowler label", roles.bowler ? "yes" : "no"],
+        ["Wicketkeeper", roles.wicketkeeper ? "yes" : "no"],
+        ["Fielders", String((roles.fielder || []).length)],
       );
     }
     for (const [label, value] of rows) {
@@ -198,7 +239,7 @@ function renderResult(result) {
   table.className = "deliveries";
   const head = document.createElement("thead");
   const headRow = document.createElement("tr");
-  for (const label of ["#", "Release", "Contact", "Audio check", "Shot", "Runs"]) {
+  for (const label of ["#", "Release", "Ball release", "Contact", "Audio check", "Shot", "Runs", "Outcome"]) {
     const th = document.createElement("th");
     th.textContent = label;
     headRow.append(th);
@@ -209,15 +250,18 @@ function renderResult(result) {
   for (const delivery of deliveries) {
     const tr = document.createElement("tr");
     const contact = delivery.contact || {};
+    const ballRelease = delivery.ball_release || {};
     const cells = [
       delivery.index,
       delivery.release_time_s == null ? "—" : `${delivery.release_time_s}s`,
+      ballRelease.accepted ? ballRelease.source : "not accepted",
       contact.video_detected ? `${contact.time_s}s` : "none",
       contact.audio_confirmation || "—",
       delivery.shot || "—",
       delivery.virtual_runs == null ? "—" : String(delivery.virtual_runs),
+      delivery.outcome ? `${delivery.outcome} (${delivery.outcome_runs})` : "—",
     ];
-    const labels = ["#", "Release", "Contact", "Audio check", "Shot", "Runs"];
+    const labels = ["#", "Release", "Ball release", "Contact", "Audio check", "Shot", "Runs", "Outcome"];
     cells.forEach((value, index) => {
       const td = document.createElement("td");
       td.dataset.label = labels[index];
@@ -227,4 +271,95 @@ function renderResult(result) {
     body.append(tr);
   }
   resultEl.append(table);
+  setupDrawing(result);
+}
+
+const drawPanel = document.querySelector("#draw-panel");
+const drawNote = document.querySelector("#draw-note");
+const drawCanvas = document.querySelector("#draw-canvas");
+const drawError = document.querySelector("#draw-error");
+let drawMode = "stumps";
+let drawStart = null;
+let stumpBox = null;
+let pitchBox = null;
+let frameImage = null;
+
+document.querySelector("#draw-stumps").addEventListener("click", () => { drawMode = "stumps"; });
+document.querySelector("#draw-pitch").addEventListener("click", () => { drawMode = "pitch"; });
+document.querySelector("#save-marks").addEventListener("click", saveMarks);
+
+function setupDrawing(result) {
+  const stumps = result && result.geometry && result.geometry.stumps;
+  if (!stumps || !sessionIdEl.textContent) {
+    drawPanel.hidden = true;
+    return;
+  }
+  drawPanel.hidden = false;
+  drawNote.textContent = stumps.manual_required
+    ? "The stumps were not locked in the first five frames. Draw a box on this first frame. It stays fixed for the whole clip. The pitch box is optional and marks a dead ball when the ball leaves it."
+    : "The stump box is fixed. Draw only if you want to replace it, or draw the pitch.";
+  const image = new Image();
+  image.onload = () => {
+    frameImage = image;
+    drawCanvas.width = image.naturalWidth;
+    drawCanvas.height = image.naturalHeight;
+    paintDraw();
+  };
+  image.src = `/api/sessions/${encodeURIComponent(sessionIdEl.textContent)}/frames/0`;
+}
+
+function canvasPoint(event) {
+  const rect = drawCanvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) * (drawCanvas.width / rect.width),
+    y: (event.clientY - rect.top) * (drawCanvas.height / rect.height),
+  };
+}
+
+drawCanvas.addEventListener("pointerdown", (event) => {
+  drawStart = canvasPoint(event);
+});
+drawCanvas.addEventListener("pointerup", (event) => {
+  if (!drawStart) return;
+  const end = canvasPoint(event);
+  const box = [drawStart.x, drawStart.y, end.x, end.y];
+  if (drawMode === "pitch") pitchBox = box;
+  else stumpBox = box;
+  drawStart = null;
+  paintDraw();
+});
+
+function paintDraw() {
+  const context = drawCanvas.getContext("2d");
+  context.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  if (frameImage) context.drawImage(frameImage, 0, 0, drawCanvas.width, drawCanvas.height);
+  strokeBox(context, pitchBox, "#8fbf7f");
+  strokeBox(context, stumpBox, "#e0b15c");
+}
+
+function strokeBox(context, box, color) {
+  if (!box) return;
+  context.strokeStyle = color;
+  context.lineWidth = 3;
+  context.strokeRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
+}
+
+async function saveMarks() {
+  drawError.hidden = true;
+  const body = {};
+  if (stumpBox) body.stumps = stumpBox;
+  if (pitchBox) body.pitch = pitchBox;
+  try {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionIdEl.textContent)}/marks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "Could not save the boxes");
+    showSession(payload);
+  } catch (error) {
+    drawError.hidden = false;
+    drawError.textContent = error.message;
+  }
 }

@@ -42,6 +42,16 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_user_created ON sessions (user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs (status, created_at);
+
+CREATE TABLE IF NOT EXISTS annotations (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    video_ref TEXT,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_annotations_created ON annotations (created_at);
 """
 
 
@@ -143,6 +153,46 @@ def insert_session(
             """,
             (session_id, user_id, source, original_name, video_path, video_bytes, now, now),
         )
+
+
+def list_sessions(db_path: Path, limit: int = 200) -> list[dict]:
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM sessions ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def insert_annotation(db_path: Path, *, kind: str, video_ref: str | None, payload_json: str) -> str:
+    annotation_id = str(uuid4())
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO annotations (id, kind, video_ref, payload_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (annotation_id, kind, video_ref, payload_json, utcnow()),
+        )
+    return annotation_id
+
+
+def list_annotations(db_path: Path, kind: str | None = None) -> list[dict]:
+    with connect(db_path) as conn:
+        if kind:
+            rows = conn.execute(
+                "SELECT * FROM annotations WHERE kind = ? ORDER BY created_at DESC",
+                (kind,),
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM annotations ORDER BY created_at DESC").fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_annotation(db_path: Path, annotation_id: str) -> dict | None:
+    with connect(db_path) as conn:
+        row = conn.execute("SELECT * FROM annotations WHERE id = ?", (annotation_id,)).fetchone()
+    return dict(row) if row else None
 
 
 def list_user_sessions(db_path: Path, user_id: str) -> list[dict]:

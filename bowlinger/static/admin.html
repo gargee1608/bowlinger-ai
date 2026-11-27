@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <title>BOWLINGER — save history</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <p class="eyebrow">Admin</p>
+    <h1>Save history</h1>
+    <nav class="nav">
+      <a href="/">Analyse</a>
+      <a href="/admin/history">Save history</a>
+      <a href="/train">Train boxes</a>
+      <a href="/train/audio">Train audio</a>
+    </nav>
+    <p class="lede">Newest session first. Each result opens at /s/&lt;session id&gt;.</p>
+  </header>
+  <main>
+    <section class="panel">
+      <p class="form-error" id="history-error" hidden></p>
+      <div id="history"></div>
+    </section>
+  </main>
+  <script>
+    const historyEl = document.querySelector("#history");
+    const errorEl = document.querySelector("#history-error");
+    load();
+    async function load() {
+      const response = await fetch("/api/admin/sessions");
+      if (response.status === 401) {
+        location.assign("/admin/history");
+        return;
+      }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        errorEl.hidden = false;
+        errorEl.textContent = payload.detail || "Could not load history";
+        return;
+      }
+      historyEl.replaceChildren();
+      if (!payload.sessions.length) {
+        const empty = document.createElement("p");
+        empty.className = "hint";
+        empty.textContent = "No sessions yet.";
+        historyEl.append(empty);
+        return;
+      }
+      for (const session of payload.sessions) {
+        const card = document.createElement("article");
+        card.className = "panel";
+        const title = document.createElement("h2");
+        title.textContent = session.original_name || session.session_id;
+        const meta = document.createElement("p");
+        meta.className = "hint";
+        meta.textContent = `${session.created_at} · ${session.status} · ${session.source}`;
+        const link = document.createElement("a");
+        link.href = session.path;
+        link.textContent = session.path;
+        const video = document.createElement("video");
+        video.controls = true;
+        video.preload = "metadata";
+        video.src = session.video;
+        card.append(title, meta, link, video);
+        historyEl.append(card);
+      }
+    }
+  </script>
+</body>
+</html>

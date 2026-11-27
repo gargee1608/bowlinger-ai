@@ -32,6 +32,23 @@ docker compose up -d --build
 
 Open `http://BALU-001:8741` from a machine that can reach the server, or `http://127.0.0.1:8741` on the server itself.
 
+Set a password before anyone opens the history or training pages. Compose reads it from the environment. It is not written into the database.
+
+```bash
+export BOWLINGER_ADMIN_PASSWORD='choose-a-password'
+docker compose up -d --build
+```
+
+| Page | URL |
+| --- | --- |
+| Analyse | `http://BALU-001:8741/` |
+| One saved result | `http://BALU-001:8741/s/<session id>` (the history page uses the relative link `/s/<session id>`) |
+| Save history | `http://BALU-001:8741/admin/history` |
+| Box training | `http://BALU-001:8741/train` |
+| Audio training | `http://BALU-001:8741/train/audio` |
+
+`ffmpeg` is installed in the image. `yt-dlp` is installed from `requirements.txt`. A YouTube link is downloaded and analysed like an upload. The URL itself is not stored.
+
 ```bash
 docker compose ps
 docker compose logs -f bowlinger

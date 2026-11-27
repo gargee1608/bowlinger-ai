@@ -59,6 +59,8 @@ class Settings:
     detector: str = "auto"
     model_config: Path | None = None
     model_name: str = ""
+    # Empty means the admin and training pages stay closed.
+    admin_password: str = ""
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -84,4 +86,5 @@ class Settings:
             if os.environ.get("BOWLINGER_MODEL_CONFIG")
             else None,
             model_name=os.environ.get("BOWLINGER_MODEL", ""),
+            admin_password=os.environ.get("BOWLINGER_ADMIN_PASSWORD", ""),
         )

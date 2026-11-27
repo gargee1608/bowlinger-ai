@@ -9,6 +9,7 @@ services:
       BOWLINGER_PORT: "8741"
       BOWLINGER_DATA: /data
       BOWLINGER_DB: /var/lib/bowlinger/bowlinger.db
+      BOWLINGER_ADMIN_PASSWORD: ${BOWLINGER_ADMIN_PASSWORD:-}
     volumes:
       - bowlinger-videos:/data
       - bowlinger-db:/var/lib/bowlinger

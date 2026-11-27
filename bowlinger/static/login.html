@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <title>BOWLINGER — sign in</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <p class="eyebrow">Protected</p>
+    <h1>BOWLINGER</h1>
+    <p class="lede">Admin history and both training pages use the password in BOWLINGER_ADMIN_PASSWORD.</p>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>Password</h2>
+      <form id="login-form">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" required autocomplete="current-password">
+        <button type="submit">Continue</button>
+        <p class="form-error" id="login-error" hidden></p>
+      </form>
+    </section>
+  </main>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const next = params.get("next") || (location.pathname === "/login" ? "/admin/history" : location.pathname);
+    document.querySelector("#login-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const error = document.querySelector("#login-error");
+      error.hidden = true;
+      const body = new FormData();
+      body.set("password", document.querySelector("#password").value);
+      const response = await fetch("/api/admin/login", { method: "POST", body });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        error.hidden = false;
+        error.textContent = payload.detail || "Sign-in failed";
+        return;
+      }
+      location.assign(next);
+    });
+  </script>
+</body>
+</html>

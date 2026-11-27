@@ -29,6 +29,18 @@ docker compose up -d --build
 
 Port **8741** is published on `0.0.0.0`. Uploaded videos and the SQLite database are in separate volumes (`bowlinger-videos` and `bowlinger-db`), and the container restarts unless you stop it. Server install, update, Tailscale, and Cloudflare Tunnel steps are in [DEPLOY.md](DEPLOY.md).
 
+## Pages
+
+| Page | URL |
+| --- | --- |
+| Analyse (upload or YouTube) | `/` |
+| One result | `/s/<session id>` |
+| Save history | `/admin/history` |
+| Box training | `/train` |
+| Audio training | `/train/audio` |
+
+The history and training pages use `BOWLINGER_ADMIN_PASSWORD`. Leave it unset and those pages stay closed.
+
 ## Upload a video
 
 Open the site, choose a clip, and start analysis. The page polls until the session is `completed` or `failed`.

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <title>BOWLINGER — box training</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <p class="eyebrow">Training</p>
+    <h1>Mark the frame</h1>
+    <nav class="nav">
+      <a href="/">Analyse</a>
+      <a href="/admin/history">Save history</a>
+      <a href="/train">Train boxes</a>
+      <a href="/train/audio">Train audio</a>
+    </nav>
+  </header>
+  <main>
+    <section class="panel">
+      <form id="open-form">
+        <label for="session-id">Session id</label>
+        <input id="session-id" required placeholder="session id">
+        <button type="submit">Open video</button>
+      </form>
+      <p class="form-error" id="train-error" hidden></p>
+      <video id="video" controls hidden></video>
+      <p class="hint" id="frame-line" hidden></p>
+      <canvas id="canvas" hidden></canvas>
+      <label for="label">Box label</label>
+      <select id="label">
+        <option>stumps</option>
+        <option>batsman</option>
+        <option>bowler</option>
+        <option>fielder</option>
+        <option>wicketkeeper</option>
+        <option>bat</option>
+        <option>ball</option>
+      </select>
+      <div class="draw-actions">
+        <button type="button" id="mark-release">Mark release frame</button>
+        <button type="button" id="mark-contact">Mark contact frame</button>
+        <button type="button" id="save">Save annotation</button>
+      </div>
+      <p class="hint" id="saved" hidden></p>
+    </section>
+  </main>
+  <script>
+    const video = document.querySelector("#video");
+    const canvas = document.querySelector("#canvas");
+    const errorEl = document.querySelector("#train-error");
+    const frameLine = document.querySelector("#frame-line");
+    const saved = document.querySelector("#saved");
+    let sessionId = "";
+    let boxes = [];
+    let events = [];
+    let start = null;
+    let width = 0;
+    let height = 0;
+    let fps = 30;
+
+    document.querySelector("#open-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      errorEl.hidden = true;
+      sessionId = document.querySelector("#session-id").value.trim();
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        errorEl.hidden = false;
+        errorEl.textContent = payload.detail || "Session not found";
+        return;
+      }
+      const info = (payload.result && payload.result.video) || {};
+      width = info.width || 0;
+      height = info.height || 0;
+      fps = info.fps || 30;
+      video.hidden = false;
+      canvas.hidden = false;
+      video.src = `/api/sessions/${encodeURIComponent(sessionId)}/video`;
+      boxes = [];
+      events = [];
+      video.onloadeddata = () => {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        paint();
+      };
+    });
+
+    video.addEventListener("timeupdate", () => {
+      frameLine.hidden = false;
+      const frame = Math.round(video.currentTime * fps);
+      frameLine.textContent = `Frame ${frame} · ${video.currentTime.toFixed(3)} s`;
+      paint();
+    });
+
+    function point(event) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (event.clientX - rect.left) * (canvas.width / rect.width),
+        y: (event.clientY - rect.top) * (canvas.height / rect.height),
+      };
+    }
+    canvas.addEventListener("pointerdown", (event) => { start = point(event); });
+    canvas.addEventListener("pointerup", (event) => {
+      if (!start) return;
+      const end = point(event);
+      const frame = Math.round((video.currentTime || 0) * fps);
+      boxes.push({
+        frame,
+        time_s: Number((video.currentTime || 0).toFixed(3)),
+        label: document.querySelector("#label").value,
+        box: [start.x, start.y, end.x, end.y],
+      });
+      start = null;
+      paint();
+    });
+
+    function paint() {
+      const context = canvas.getContext("2d");
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      const frame = Math.round((video.currentTime || 0) * fps);
+      context.strokeStyle = "#e0b15c";
+      context.lineWidth = 2;
+      context.font = "14px sans-serif";
+      for (const item of boxes) {
+        if (Math.abs(item.frame - frame) > 1) continue;
+        const [x1, y1, x2, y2] = item.box;
+        context.strokeRect(x1, y1, x2 - x1, y2 - y1);
+        context.fillStyle = "#e0b15c";
+        context.fillText(item.label, x1, Math.max(14, y1 - 4));
+      }
+    }
+
+    function addEvent(kind) {
+      const frame = Math.round((video.currentTime || 0) * fps);
+      events.push({ kind, frame, time_s: Number((video.currentTime || 0).toFixed(3)) });
+      frameLine.textContent = `Marked ${kind} at frame ${frame}`;
+    }
+    document.querySelector("#mark-release").addEventListener("click", () => addEvent("release"));
+    document.querySelector("#mark-contact").addEventListener("click", () => addEvent("contact"));
+    document.querySelector("#save").addEventListener("click", async () => {
+      errorEl.hidden = true;
+      const response = await fetch("/api/train/annotations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "video",
+          video_ref: sessionId,
+          width: canvas.width || width,
+          height: canvas.height || height,
+          fps,
+          boxes,
+          events,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        errorEl.hidden = false;
+        errorEl.textContent = payload.detail || "Save failed";
+        return;
+      }
+      saved.hidden = false;
+      saved.innerHTML = "";
+      const link = document.createElement("a");
+      link.href = `/api/train/annotations/${payload.id}/yolo`;
+      link.textContent = "Download YOLO export";
+      saved.append(`Saved ${payload.id}. `, link);
+    });
+  </script>
+</body>
+</html>

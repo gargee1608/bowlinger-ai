@@ -2,20 +2,37 @@
 
 from __future__ import annotations
 
+import json
+import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+import cv2
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from bowlinger import __version__
+from bowlinger.auth import COOKIE_NAME, admin_configured, cookie_matches, cookie_token, password_matches
 from bowlinger.config import Settings
-from bowlinger.db import get_session, init_db, list_user_sessions
+from bowlinger.db import (
+    get_annotation,
+    get_session,
+    init_db,
+    insert_annotation,
+    list_annotations,
+    list_sessions,
+    list_user_sessions,
+    set_session_status,
+)
 from bowlinger.jobs import JobQueue
 from bowlinger.pipeline.analyze import process_job
+from bowlinger.pipeline.areas import apply_marks
 from bowlinger.sessions import accept_demo, accept_video, public_session
+from bowlinger.spectrogram import spectrogram_png, waveform_peaks
 from bowlinger.storage import QuotaError, used_bytes
+from bowlinger.train_export import export_zip
+from bowlinger.youtube import download_youtube, validate_youtube_url
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -58,6 +75,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "boundary_m": settings.boundary_m,
             "defence_max_mps": settings.defence_max_mps,
             "defaults_pending_approval": True,
+            "pages": {
+                "home": "/",
+                "session": "/s/{session_id}",
+                "admin": "/admin/history",
+                "train": "/train",
+                "audio_train": "/train/audio",
+            },
         }
 
     @app.post("/api/sessions", status_code=201)
@@ -122,6 +146,183 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ],
         }
 
+    @app.post("/api/sessions/youtube", status_code=201)
+    def create_youtube_session(url: str = Form(...), user_key: str | None = Form(None)) -> dict:
+        try:
+            validate_youtube_url(url)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        try:
+            with tempfile.TemporaryDirectory(prefix="bowlinger-yt-") as directory:
+                video_path, title = download_youtube(url, Path(directory))
+                data = video_path.read_bytes()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="Could not download that YouTube video") from exc
+        try:
+            row = accept_video(
+                settings,
+                filename=f"{title}.mp4",
+                data=data,
+                user_key=user_key,
+                source="youtube",
+            )
+        except QuotaError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        queue.enqueue(row["id"])
+        fresh = get_session(settings.db_path, row["id"])
+        return public_session(fresh or row)
+
+    @app.post("/api/sessions/{session_id}/marks")
+    def save_marks(session_id: str, payload: dict) -> dict:
+        row = get_session(settings.db_path, session_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if not row.get("result_json"):
+            raise HTTPException(status_code=409, detail="Analysis has not finished")
+        result = json.loads(row["result_json"])
+        marks = {
+            "stumps": _box(payload.get("stumps")),
+            "pitch": _box(payload.get("pitch")),
+            "release_frame": _optional_int(payload.get("release_frame")),
+            "contact_frame": _optional_int(payload.get("contact_frame")),
+        }
+        apply_marks(result, marks)
+        set_session_status(
+            settings.db_path,
+            session_id,
+            row["status"],
+            error=row.get("error"),
+            result_json=json.dumps(result),
+        )
+        fresh = get_session(settings.db_path, session_id)
+        return public_session(fresh or row)
+
+    @app.get("/api/sessions/{session_id}/video")
+    def session_video(session_id: str) -> FileResponse:
+        row = _ready_session(settings, session_id)
+        path = Path(row["video_path"])
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Video file is missing")
+        return FileResponse(path, media_type="video/mp4", filename=path.name)
+
+    @app.get("/api/sessions/{session_id}/frames/{frame_index}")
+    def session_frame(session_id: str, frame_index: int) -> Response:
+        row = _ready_session(settings, session_id)
+        encoded = _jpeg_frame(Path(row["video_path"]), frame_index)
+        return Response(content=encoded, media_type="image/jpeg")
+
+    @app.post("/api/admin/login")
+    def admin_login(response: Response, password: str = Form(...)) -> dict:
+        if not admin_configured(settings):
+            raise HTTPException(status_code=503, detail="Set BOWLINGER_ADMIN_PASSWORD before using this page")
+        if not password_matches(settings, password):
+            raise HTTPException(status_code=401, detail="Wrong password")
+        response.set_cookie(
+            COOKIE_NAME,
+            cookie_token(settings),
+            httponly=True,
+            samesite="lax",
+            max_age=60 * 60 * 12,
+            path="/",
+        )
+        return {"ok": True}
+
+    @app.get("/api/admin/sessions")
+    def admin_sessions(request: Request) -> dict:
+        _require_admin(settings, request)
+        rows = []
+        for row in list_sessions(settings.db_path):
+            public = public_session(row)
+            rows.append(
+                {
+                    "session_id": public["session_id"],
+                    "status": public["status"],
+                    "source": public["source"],
+                    "original_name": public["original_name"],
+                    "created_at": public["created_at"],
+                    "video_bytes": public["video_bytes"],
+                    "path": f"/s/{public['session_id']}",
+                    "video": f"/api/sessions/{public['session_id']}/video",
+                }
+            )
+        return {"sessions": rows}
+
+    @app.post("/api/train/annotations", status_code=201)
+    def save_annotation(request: Request, payload: dict) -> dict:
+        _require_admin(settings, request)
+        kind = str(payload.get("kind") or "video")
+        if kind not in {"video", "audio"}:
+            raise HTTPException(status_code=400, detail="kind must be video or audio")
+        video_ref = payload.get("video_ref")
+        if video_ref is not None:
+            video_ref = str(video_ref)[:200]
+        annotation_id = insert_annotation(
+            settings.db_path,
+            kind=kind,
+            video_ref=video_ref,
+            payload_json=json.dumps(payload),
+        )
+        return {"id": annotation_id, "kind": kind}
+
+    @app.get("/api/train/annotations")
+    def read_annotations(request: Request, kind: str | None = None) -> dict:
+        _require_admin(settings, request)
+        items = []
+        for row in list_annotations(settings.db_path, kind):
+            items.append(
+                {
+                    "id": row["id"],
+                    "kind": row["kind"],
+                    "video_ref": row["video_ref"],
+                    "created_at": row["created_at"],
+                }
+            )
+        return {"annotations": items}
+
+    @app.get("/api/train/annotations/{annotation_id}")
+    def read_annotation(annotation_id: str, request: Request) -> dict:
+        _require_admin(settings, request)
+        row = get_annotation(settings.db_path, annotation_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Annotation not found")
+        return {
+            "id": row["id"],
+            "kind": row["kind"],
+            "video_ref": row["video_ref"],
+            "created_at": row["created_at"],
+            "payload": json.loads(row["payload_json"]),
+        }
+
+    @app.get("/api/train/annotations/{annotation_id}/yolo")
+    def download_yolo(annotation_id: str, request: Request) -> Response:
+        _require_admin(settings, request)
+        row = get_annotation(settings.db_path, annotation_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Annotation not found")
+        payload = json.loads(row["payload_json"])
+        body = export_zip(payload)
+        return Response(
+            content=body,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{annotation_id}.zip"'},
+        )
+
+    @app.get("/api/train/waveform")
+    def train_waveform(request: Request, session_id: str) -> dict:
+        _require_admin(settings, request)
+        row = _ready_session(settings, session_id)
+        return waveform_peaks(Path(row["video_path"]))
+
+    @app.get("/api/train/spectrogram")
+    def train_spectrogram(request: Request, session_id: str) -> Response:
+        _require_admin(settings, request)
+        row = _ready_session(settings, session_id)
+        return Response(content=spectrogram_png(Path(row["video_path"])), media_type="image/png")
+
     @app.get("/")
     def home() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
@@ -130,5 +331,83 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def session_page(session_id: str) -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
+    @app.get("/admin")
+    def admin_home(request: Request):
+        return _gated_page(settings, request, "admin.html")
+
+    @app.get("/admin/history")
+    def admin_history(request: Request):
+        return _gated_page(settings, request, "admin.html")
+
+    @app.get("/train")
+    def train_page(request: Request):
+        return _gated_page(settings, request, "train.html")
+
+    @app.get("/train/audio")
+    def audio_train_page(request: Request):
+        return _gated_page(settings, request, "audio.html")
+
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     return app
+
+
+def _require_admin(settings: Settings, request: Request) -> None:
+    if not admin_configured(settings):
+        raise HTTPException(status_code=503, detail="Set BOWLINGER_ADMIN_PASSWORD before using this page")
+    if not cookie_matches(settings, request.cookies.get(COOKIE_NAME)):
+        raise HTTPException(status_code=401, detail="Admin password required")
+
+
+def _gated_page(settings: Settings, request: Request, filename: str):
+    if not admin_configured(settings):
+        return HTMLResponse(
+            "<main><h1>BOWLINGER</h1><p>Set BOWLINGER_ADMIN_PASSWORD before opening this page.</p></main>",
+            status_code=503,
+        )
+    if not cookie_matches(settings, request.cookies.get(COOKIE_NAME)):
+        return FileResponse(STATIC_DIR / "login.html")
+    return FileResponse(STATIC_DIR / filename)
+
+
+def _ready_session(settings: Settings, session_id: str) -> dict:
+    row = get_session(settings.db_path, session_id)
+    if row is None or not row.get("video_path"):
+        raise HTTPException(status_code=404, detail="Session not found")
+    return row
+
+
+def _box(value) -> list[float] | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, list) or len(value) != 4:
+        raise HTTPException(status_code=400, detail="A box needs four numbers: x1, y1, x2, y2")
+    try:
+        return [float(item) for item in value]
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="A box needs four numbers") from exc
+
+
+def _optional_int(value) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="A frame number must be an integer") from exc
+
+
+def _jpeg_frame(path: Path, frame_index: int) -> bytes:
+    if frame_index < 0:
+        raise HTTPException(status_code=400, detail="Frame index cannot be negative")
+    capture = cv2.VideoCapture(str(path))
+    try:
+        capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        ok, frame = capture.read()
+    finally:
+        capture.release()
+    if not ok or frame is None:
+        raise HTTPException(status_code=404, detail="That frame is not in the video")
+    success, encoded = cv2.imencode(".jpg", frame)
+    if not success:
+        raise HTTPException(status_code=500, detail="Could not encode the frame")
+    return encoded.tobytes()

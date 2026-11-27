@@ -13,7 +13,13 @@
       <p class="eyebrow">Cricket video</p>
       <h1>BOWLINGER</h1>
     </div>
-    <p class="lede">Upload a clip. The reading runs in the background against a session id, so you can leave and open it again.</p>
+    <p class="lede">Upload a clip, or paste a YouTube link. The reading runs in the background against a session id, so you can leave and open it again.</p>
+    <nav class="nav">
+      <a href="/">Analyse</a>
+      <a href="/admin/history">Save history</a>
+      <a href="/train">Train boxes</a>
+      <a href="/train/audio">Train audio</a>
+    </nav>
   </header>
 
   <main>
@@ -25,6 +31,10 @@
         <label for="user-key">User key <span>optional — leave blank for an anonymous key</span></label>
         <input id="user-key" name="user_key" type="text" maxlength="64" autocomplete="off" placeholder="coach_1">
         <button type="submit" id="upload-button">Start analysis</button>
+        <label for="youtube-url">Or a YouTube link</label>
+        <input id="youtube-url" type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=…">
+        <button type="button" id="youtube-button">Analyse YouTube link</button>
+        <p class="form-error" id="youtube-error" hidden></p>
         <p class="hint" id="storage-line" hidden></p>
         <p class="form-error" id="upload-error" hidden></p>
       </form>
@@ -52,6 +62,17 @@
       <p class="hint">Save this id. Anyone with it can open the result. This page keeps asking until the job finishes.</p>
       <p class="form-error" id="job-error" hidden></p>
       <div id="result"></div>
+      <div id="draw-panel" hidden>
+        <h2>Stumps and pitch</h2>
+        <p class="hint" id="draw-note"></p>
+        <canvas id="draw-canvas" width="478" height="850"></canvas>
+        <div class="draw-actions">
+          <button type="button" id="draw-stumps">Draw stumps</button>
+          <button type="button" id="draw-pitch">Draw pitch</button>
+          <button type="button" id="save-marks">Use these boxes</button>
+        </div>
+        <p class="form-error" id="draw-error" hidden></p>
+      </div>
     </section>
   </main>
 
