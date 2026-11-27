@@ -13,6 +13,7 @@ from bowlinger.pipeline.areas import (
     apply_marks,
     assess_release,
     ball_outside_pitch,
+    point_in_polygon,
     batsman_confirmed_before,
     classify_roles,
     contact_outcome,
@@ -145,6 +146,62 @@ def test_marks_replace_the_stump_box_without_changing_virtual_runs():
     assert result["deliveries"][0]["outcome"] == "dead_ball"
     assert result["deliveries"][0]["outcome_runs"] == 0
     assert result["deliveries"][0]["audio_analysed"] is True
+
+
+def test_point_in_polygon_and_irregular_dead_ball():
+    shape = [[0, 0], [100, 0], [100, 40], [40, 40], [40, 100], [0, 100]]
+    assert point_in_polygon(20, 20, shape) is True
+    assert point_in_polygon(80, 20, shape) is True
+    assert point_in_polygon(20, 80, shape) is True
+    assert point_in_polygon(80, 80, shape) is False
+    assert ball_outside_pitch([{"x": 20, "y": 20}, {"x": 80, "y": 80}], shape) is True
+    assert ball_outside_pitch([{"x": 20, "y": 20}], shape) is False
+    assert ball_outside_pitch([{"x": 150, "y": 10}], [0, 0, 100, 100]) is True
+    result = {
+        "video": {"width": 200, "height": 200, "fps": 30},
+        "preanalysis": {"audio_present": False},
+        "geometry": {
+            "roles": {
+                "batsman": {"label": "batsman", "box": [70, 70, 90, 90], "frame": 1},
+                "bowler": {"label": "bowler", "box": [10, 10, 30, 40], "frame": 2},
+                "fielder": [],
+                "wicketkeeper": None,
+                "batsman_confirmed": True,
+            }
+        },
+        "deliveries": [
+            {
+                "virtual_runs": 4,
+                "shot": "cover drive",
+                "release_frame": 2,
+                "release_time_s": 0.1,
+                "ball_points": [
+                    {"frame": 2, "x": 20, "y": 20},
+                    {"frame": 4, "x": 80, "y": 80},
+                    {"frame": 6, "x": 20, "y": 80},
+                ],
+                "contact": {"video_detected": True, "time_s": 0.2, "frame": 6},
+                "batsman_confirmed_before_release": True,
+                "bat_box": [10, 10, 30, 30],
+            }
+        ],
+    }
+    apply_marks(result, {"pitch_polygon": shape})
+    delivery = result["deliveries"][0]
+    assert delivery["virtual_runs"] == 4
+    assert delivery["shot"] == "cover drive"
+    assert delivery["contact"]["time_s"] == 0.2
+    assert delivery["dead_ball"] is True
+    assert delivery["outcome"] == "dead_ball"
+    assert delivery["outcome_runs"] == 0
+    assert delivery["ball_points_inside"] == 2
+    assert delivery["bat_inside_pitch"] is True
+    assert result["geometry"]["pitch"]["fixed"] is True
+    assert len(result["geometry"]["pitch"]["polygon"]) == 6
+    assert result["geometry"]["roles"]["batsman"] is None
+    assert result["geometry"]["roles"]["bowler"]["label"] == "bowler"
+    apply_marks(result, {"pitch": [0, 0, 50, 50]})
+    assert len(result["geometry"]["pitch"]["polygon"]) == 4
 
 
 def test_youtube_url_must_be_a_youtube_host():
@@ -285,3 +342,43 @@ def test_session_marks_and_first_frame(settings, tmp_path):
         assert geometry["stumps"]["source"] == "manual"
         assert geometry["stumps"]["fixed"] is True
         assert geometry["pitch"]["source"] == "manual"
+        assert len(geometry["pitch"]["polygon"]) == 4
+
+
+def test_pitch_polygon_is_saved_and_loaded(settings, tmp_path):
+    clip = tmp_path / "bowl.mp4"
+    write_clip(clip, ClipSpec(shot="defence", hold_frames=0, pre_frames=4, post_frames=2))
+    polygon = [[10, 10], [220, 15], [200, 90], [40, 120], [12, 70]]
+    with TestClient(create_app(settings)) as client:
+        home = client.get("/")
+        assert b"Complete Area" in home.content and b"Analysis" in home.content
+        train = client.get("/train")
+        assert b"Draw pitch area" in train.content and b"Complete Area" in train.content
+        with clip.open("rb") as handle:
+            uploaded = client.post(
+                "/api/sessions",
+                files={"video": ("bowl.mp4", handle, "video/mp4")},
+                data={"user_key": "coach_1"},
+            )
+        session_id = uploaded.json()["session_id"]
+        saved = client.post(f"/api/sessions/{session_id}/marks", json={"pitch_polygon": polygon})
+        assert saved.status_code == 200
+        stored = saved.json()["result"]["geometry"]["pitch"]
+        assert stored["fixed"] is True
+        assert stored["polygon"] == polygon
+        loaded = client.get(f"/api/sessions/{session_id}")
+        assert loaded.json()["result"]["geometry"]["pitch"]["polygon"] == polygon
+        short = client.post(f"/api/sessions/{session_id}/marks", json={"pitch_polygon": [[1, 1], [2, 2]]})
+        assert short.status_code == 400
+        started = client.post(
+            f"/api/sessions/{session_id}/analyse",
+            json={"pitch_polygon": polygon, "stumps": [20, 20, 40, 80]},
+        )
+        assert started.status_code == 200
+        body = started.json()
+        assert body["status"] == "completed"
+        assert body["result"]["geometry"]["pitch"]["polygon"] == polygon
+        assert body["result"]["geometry"]["pitch"]["fixed"] is True
+        assert body["result"]["geometry"]["stumps"]["source"] == "manual"
+        again = client.get(f"/api/sessions/{session_id}")
+        assert again.json()["result"]["geometry"]["pitch"]["polygon"] == polygon

@@ -81,6 +81,9 @@ def connect(db_path: Path) -> Iterator[sqlite3.Connection]:
 def init_db(db_path: Path) -> None:
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+        if "overrides_json" not in columns:
+            conn.execute("ALTER TABLE sessions ADD COLUMN overrides_json TEXT")
 
 
 def create_job(db_path: Path, session_id: str) -> str:
@@ -208,6 +211,14 @@ def delete_session(db_path: Path, session_id: str) -> None:
     with connect(db_path) as conn:
         conn.execute("DELETE FROM jobs WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+
+
+def set_session_overrides(db_path: Path, session_id: str, overrides_json: str) -> None:
+    with connect(db_path) as conn:
+        conn.execute(
+            "UPDATE sessions SET overrides_json = ?, updated_at = ? WHERE id = ?",
+            (overrides_json, utcnow(), session_id),
+        )
 
 
 def get_session(db_path: Path, session_id: str) -> dict | None:

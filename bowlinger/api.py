@@ -23,6 +23,7 @@ from bowlinger.db import (
     list_annotations,
     list_sessions,
     list_user_sessions,
+    set_session_overrides,
     set_session_status,
 )
 from bowlinger.jobs import JobQueue
@@ -184,13 +185,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not row.get("result_json"):
             raise HTTPException(status_code=409, detail="Analysis has not finished")
         result = json.loads(row["result_json"])
-        marks = {
-            "stumps": _box(payload.get("stumps")),
-            "pitch": _box(payload.get("pitch")),
-            "release_frame": _optional_int(payload.get("release_frame")),
-            "contact_frame": _optional_int(payload.get("contact_frame")),
-        }
+        marks = _marks_from_payload(payload)
         apply_marks(result, marks)
+        set_session_overrides(settings.db_path, session_id, _merged_overrides(row.get("overrides_json"), marks))
         set_session_status(
             settings.db_path,
             session_id,
@@ -198,6 +195,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             error=row.get("error"),
             result_json=json.dumps(result),
         )
+        fresh = get_session(settings.db_path, session_id)
+        return public_session(fresh or row)
+
+    @app.post("/api/sessions/{session_id}/analyse")
+    def analyse_with_areas(session_id: str, payload: dict) -> dict:
+        row = get_session(settings.db_path, session_id)
+        if row is None or not row.get("video_path"):
+            raise HTTPException(status_code=404, detail="Session not found")
+        marks = _marks_from_payload(payload)
+        set_session_overrides(settings.db_path, session_id, _merged_overrides(row.get("overrides_json"), marks))
+        set_session_status(settings.db_path, session_id, "queued", error=None)
+        queue.enqueue(session_id)
         fresh = get_session(settings.db_path, session_id)
         return public_session(fresh or row)
 
@@ -369,6 +378,66 @@ def _ready_session(settings: Settings, session_id: str) -> dict:
     if row is None or not row.get("video_path"):
         raise HTTPException(status_code=404, detail="Session not found")
     return row
+
+
+def _marks_from_payload(payload: dict) -> dict:
+    box, polygon = _pitch_parts(payload)
+    return {
+        "stumps": _box(payload.get("stumps")),
+        "pitch": box,
+        "pitch_polygon": polygon,
+        "release_frame": _optional_int(payload.get("release_frame")),
+        "contact_frame": _optional_int(payload.get("contact_frame")),
+    }
+
+
+def _merged_overrides(existing: str | None, marks: dict) -> str:
+    current = json.loads(existing) if existing else {}
+    if marks.get("stumps"):
+        current["stumps"] = marks["stumps"]
+    if marks.get("pitch_polygon"):
+        current["pitch_polygon"] = marks["pitch_polygon"]
+        current.pop("pitch", None)
+    elif marks.get("pitch"):
+        current["pitch"] = marks["pitch"]
+        current.pop("pitch_polygon", None)
+    if marks.get("release_frame") is not None:
+        current["release_frame"] = marks["release_frame"]
+    if marks.get("contact_frame") is not None:
+        current["contact_frame"] = marks["contact_frame"]
+    return json.dumps(current)
+
+
+def _pitch_parts(payload: dict) -> tuple[list[float] | None, list | None]:
+    polygon = _polygon(payload.get("pitch_polygon"))
+    raw = payload.get("pitch")
+    box = None
+    if raw not in (None, ""):
+        if _looks_like_box(raw):
+            box = _box(raw)
+        elif polygon is None:
+            polygon = _polygon(raw)
+    return box, polygon
+
+
+def _looks_like_box(value) -> bool:
+    return isinstance(value, list) and len(value) == 4 and all(isinstance(item, (int, float)) for item in value)
+
+
+def _polygon(value) -> list | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, list) or len(value) < 3:
+        raise HTTPException(status_code=400, detail="A pitch polygon needs at least three points")
+    points = []
+    for point in value:
+        if not isinstance(point, (list, tuple)) or len(point) != 2:
+            raise HTTPException(status_code=400, detail="Each pitch point needs x and y")
+        try:
+            points.append([float(point[0]), float(point[1])])
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Each pitch point needs x and y") from exc
+    return points
 
 
 def _box(value) -> list[float] | None:

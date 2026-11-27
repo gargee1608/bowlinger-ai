@@ -12,7 +12,7 @@ from bowlinger import __version__
 from bowlinger.config import Settings
 from bowlinger.db import get_session, set_session_status
 from bowlinger.media import probe
-from bowlinger.pipeline.areas import attach_delivery_rules, box_from_center, empty_geometry, lock_stump_box
+from bowlinger.pipeline.areas import apply_marks, attach_delivery_rules, box_from_center, empty_geometry, lock_stump_box
 from bowlinger.pipeline.audio import inspect_audio
 from bowlinger.pipeline.deliveries import build_deliveries
 from bowlinger.pipeline.detect import scan_video
@@ -106,6 +106,8 @@ def process_job(settings: Settings, job: dict) -> None:
     set_session_status(settings.db_path, session["id"], "running", error=None)
     try:
         result = analyze_video(Path(session["video_path"]), settings)
+        if session.get("overrides_json"):
+            result = apply_marks(result, json.loads(session["overrides_json"]))
     except Exception as exc:
         set_session_status(settings.db_path, session["id"], "failed", error=str(exc))
         raise

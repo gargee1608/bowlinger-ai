@@ -29,6 +29,14 @@
       <video id="video" controls hidden></video>
       <p class="hint" id="frame-line" hidden></p>
       <canvas id="canvas" hidden></canvas>
+      <div class="draw-actions">
+        <button type="button" id="pitch-mode">Draw pitch area</button>
+        <button type="button" id="box-mode">Draw boxes</button>
+        <button type="button" id="complete-area">Complete Area</button>
+        <button type="button" id="clear-pitch">Clear and Redraw</button>
+        <button type="button" id="delete-point">Delete point</button>
+        <button type="button" id="analyse-pitch">Analysis</button>
+      </div>
       <label for="label">Box label</label>
       <select id="label">
         <option>stumps</option>
@@ -47,6 +55,7 @@
       <p class="hint" id="saved" hidden></p>
     </section>
   </main>
+  <script src="/static/pitch.js"></script>
   <script>
     const video = document.querySelector("#video");
     const canvas = document.querySelector("#canvas");
@@ -57,6 +66,14 @@
     let boxes = [];
     let events = [];
     let start = null;
+    let pitchMode = false;
+    const pitchEditor = createPitchEditor();
+    document.querySelector("#pitch-mode").addEventListener("click", () => { pitchMode = true; });
+    document.querySelector("#box-mode").addEventListener("click", () => { pitchMode = false; });
+    document.querySelector("#complete-area").addEventListener("click", () => { pitchEditor.complete(); paint(); });
+    document.querySelector("#clear-pitch").addEventListener("click", () => { pitchEditor.clear(); paint(); });
+    document.querySelector("#delete-point").addEventListener("click", () => { pitchEditor.removeSelected(); paint(); });
+    document.querySelector("#analyse-pitch").addEventListener("click", runAnalysis);
     let width = 0;
     let height = 0;
     let fps = 30;
@@ -102,8 +119,25 @@
         y: (event.clientY - rect.top) * (canvas.height / rect.height),
       };
     }
-    canvas.addEventListener("pointerdown", (event) => { start = point(event); });
+    canvas.addEventListener("pointerdown", (event) => {
+      const at = point(event);
+      if (pitchMode) {
+        pitchEditor.pointerDown(at);
+        paint();
+        return;
+      }
+      start = at;
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (!pitchMode || !pitchEditor.dragging) return;
+      pitchEditor.pointerMove(point(event));
+      paint();
+    });
     canvas.addEventListener("pointerup", (event) => {
+      if (pitchMode) {
+        pitchEditor.pointerUp();
+        return;
+      }
       if (!start) return;
       const end = point(event);
       const frame = Math.round((video.currentTime || 0) * fps);
@@ -115,6 +149,15 @@
       });
       start = null;
       paint();
+    });
+    canvas.addEventListener("contextmenu", (event) => {
+      if (!pitchMode) return;
+      event.preventDefault();
+      const index = pitchEditor.hit(point(event));
+      if (index >= 0) {
+        pitchEditor.removeAt(index);
+        paint();
+      }
     });
 
     function paint() {
@@ -131,6 +174,7 @@
         context.fillStyle = "#e0b15c";
         context.fillText(item.label, x1, Math.max(14, y1 - 4));
       }
+      pitchEditor.paint(context);
     }
 
     function addEvent(kind) {
@@ -153,6 +197,7 @@
           fps,
           boxes,
           events,
+          pitch_polygon: pitchEditor.points.length >= 3 ? pitchEditor.coordinates() : [],
         }),
       });
       const payload = await response.json().catch(() => ({}));
@@ -168,6 +213,32 @@
       link.textContent = "Download YOLO export";
       saved.append(`Saved ${payload.id}. `, link);
     });
+    async function runAnalysis() {
+      errorEl.hidden = true;
+      if (pitchEditor.points.length < 3) {
+        errorEl.hidden = false;
+        errorEl.textContent = "The pitch needs at least three points.";
+        return;
+      }
+      pitchEditor.complete();
+      paint();
+      const stumps = [...boxes].reverse().find((item) => item.label === "stumps");
+      const body = { pitch_polygon: pitchEditor.coordinates() };
+      if (stumps) body.stumps = stumps.box;
+      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/analyse`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        errorEl.hidden = false;
+        errorEl.textContent = payload.detail || "Analysis failed";
+        return;
+      }
+      frameLine.hidden = false;
+      frameLine.textContent = `Analysis ${payload.status} for ${payload.session_id}`;
+    }
   </script>
 </body>
 </html>

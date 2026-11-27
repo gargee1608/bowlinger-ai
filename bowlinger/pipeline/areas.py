@@ -44,6 +44,77 @@ def point_in_box(x: float, y: float, box: list[float] | None) -> bool:
     return x1 <= x <= x2 and y1 <= y <= y2
 
 
+def box_to_polygon(box: list[float]) -> list[list[float]]:
+    """A rectangle is a four-point polygon, clockwise from the top left."""
+    x1, y1, x2, y2 = box
+    return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+
+
+def point_in_polygon(x: float, y: float, polygon: list) -> bool:
+    """Even-odd rule. Fewer than three points is not a boundary."""
+    if polygon is None or len(polygon) < 3:
+        return True
+    inside = False
+    previous = len(polygon) - 1
+    for index, point in enumerate(polygon):
+        xi, yi = float(point[0]), float(point[1])
+        xj, yj = float(polygon[previous][0]), float(polygon[previous][1])
+        if (yi > y) != (yj > y):
+            cross = (xj - xi) * (y - yi) / (yj - yi) + xi
+            if x < cross:
+                inside = not inside
+        previous = index
+    return inside
+
+
+def as_polygon(area) -> list[list[float]] | None:
+    """Accept a rectangle, a list of points, or a pitch dict with either."""
+    if area is None:
+        return None
+    if isinstance(area, dict):
+        if area.get("polygon"):
+            return [[float(point[0]), float(point[1])] for point in area["polygon"]]
+        if area.get("box"):
+            return box_to_polygon(area["box"])
+        return None
+    if len(area) == 4 and all(isinstance(value, (int, float)) for value in area):
+        return box_to_polygon([float(value) for value in area])
+    if area and isinstance(area[0], (list, tuple)):
+        return [[float(point[0]), float(point[1])] for point in area]
+    return None
+
+
+def _same_as_box(polygon: list[list[float]], box: list[float] | None) -> bool:
+    """True when the polygon is just the four corners of that rectangle."""
+    if not box or len(polygon) != 4:
+        return False
+    corners = {(round(point[0], 2), round(point[1], 2)) for point in box_to_polygon(box)}
+    return {(round(point[0], 2), round(point[1], 2)) for point in polygon} == corners
+
+
+def _bounds(polygon: list[list[float]]) -> list[float]:
+    xs = [point[0] for point in polygon]
+    ys = [point[1] for point in polygon]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
+def expand_polygon(polygon: list[list[float]], width: int, height: int, fraction: float = 0.15) -> list[list[float]]:
+    """Grow every vertex away from the centroid. Used only when events are missing."""
+    count = len(polygon)
+    cx = sum(point[0] for point in polygon) / count
+    cy = sum(point[1] for point in polygon) / count
+    grown = []
+    for x, y in polygon:
+        nx = cx + (x - cx) * (1 + fraction)
+        ny = cy + (y - cy) * (1 + fraction)
+        if width:
+            nx = min(max(0.0, nx), float(width))
+        if height:
+            ny = min(max(0.0, ny), float(height))
+        grown.append([nx, ny])
+    return grown
+
+
 def lock_stump_box(sightings: list[dict], width: int, height: int) -> dict:
     """One stump box from the first five frames. Later sightings cannot move it."""
     early = [item for item in sightings if int(item.get("frame", 0)) < STUMP_FRAMES and "box" in item]
@@ -270,10 +341,33 @@ def assess_release(
     }
 
 
-def ball_outside_pitch(points: list[dict], pitch_box: list[float] | None) -> bool:
-    if pitch_box is None:
+def ball_outside_pitch(points: list[dict], pitch_area) -> bool:
+    """True when any ball point leaves the pitch. A rectangle is a 4-point polygon."""
+    polygon = as_polygon(pitch_area)
+    if not polygon or len(polygon) < 3:
         return False
-    return any(not point_in_box(point["x"], point["y"], pitch_box) for point in points)
+    return any(not point_in_polygon(point["x"], point["y"], polygon) for point in points)
+
+
+def _row_inside(row: dict | None, polygon: list[list[float]] | None) -> dict | None:
+    if row is None or not polygon or not row.get("box"):
+        return row
+    box = row["box"]
+    x = (box[0] + box[2]) / 2
+    y = (box[1] + box[3]) / 2
+    return row if point_in_polygon(x, y, polygon) else None
+
+
+def filter_roles_to_pitch(roles: dict, polygon: list[list[float]] | None) -> dict:
+    """Drop people whose box centre is outside the pitch. Tracking itself is unchanged."""
+    if not polygon or len(polygon) < 3:
+        return roles
+    roles = dict(roles)
+    for key in ("batsman", "bowler", "wicketkeeper"):
+        roles[key] = _row_inside(roles.get(key), polygon)
+    roles["fielder"] = [row for row in (roles.get("fielder") or []) if _row_inside(row, polygon)]
+    roles["batsman_confirmed"] = roles.get("batsman") is not None
+    return roles
 
 
 def recheck_pitch(pitch_box: list[float] | None, width: int, height: int, events_found: bool) -> tuple[list[float] | None, bool]:
@@ -300,7 +394,7 @@ def empty_geometry(width: int, height: int) -> dict:
         "width": width,
         "height": height,
         "stumps": lock_stump_box([], width, height),
-        "pitch": {"source": "unset", "box": None, "rechecked": False},
+        "pitch": {"source": "unset", "box": None, "polygon": None, "fixed": False, "rechecked": False},
         "movement": {"samples": 0, "active_frames": 0, "times_s": []},
         "roles": {
             "batsman": None,
@@ -320,14 +414,24 @@ def movement_summary(times_s: list[float]) -> dict:
     }
 
 
-def attach_delivery_rules(delivery: dict, stump_box: list[float] | None, pitch_box: list[float] | None, audio_present: bool) -> None:
-    """Add release, outcome and area fields. Existing keys are left as they are."""
+def attach_delivery_rules(delivery: dict, stump_box: list[float] | None, pitch_area, audio_present: bool) -> None:
+    """Add release, outcome and area fields. Existing keys are left as they are.
+
+    The pitch only decides the dead-ball flag. Release, contact and
+    ``virtual_runs`` still use the track the analyzer already built.
+    """
     points = list(delivery.get("ball_points") or [])
     manual_frame = delivery.get("manual_release_frame")
     release = assess_release(points, stump_box, manual_frame=manual_frame)
     if delivery.get("release_frame") is not None and manual_frame is None and not points:
         release["frame"] = delivery["release_frame"]
-    dead = ball_outside_pitch(points, pitch_box) if release["accepted"] or points else False
+    polygon = as_polygon(pitch_area)
+    inside = [point for point in points if polygon and point_in_polygon(point["x"], point["y"], polygon)]
+    delivery["ball_points_inside"] = len(inside) if polygon else None
+    if delivery.get("bat_box") and polygon:
+        box = delivery["bat_box"]
+        delivery["bat_inside_pitch"] = point_in_polygon((box[0] + box[2]) / 2, (box[1] + box[3]) / 2, polygon)
+    dead = ball_outside_pitch(points, pitch_area) if release["accepted"] or points else False
     video_hit = bool((delivery.get("contact") or {}).get("video_detected"))
     outcome, outcome_runs = contact_outcome(video_hit=video_hit, dead_ball=dead)
     if release["source"] != "manual" and not release["outcome_ready"] and points:
@@ -354,22 +458,38 @@ def apply_marks(result: dict, marks: dict) -> dict:
     geometry = result.setdefault("geometry", empty_geometry(width, height))
     if marks.get("stumps"):
         geometry["stumps"] = manual_stump_box([float(value) for value in marks["stumps"]], width, height)
-    pitch = geometry.setdefault("pitch", {"source": "unset", "box": None, "rechecked": False})
-    if marks.get("pitch"):
+    pitch = geometry.setdefault("pitch", {"source": "unset", "box": None, "polygon": None, "fixed": False, "rechecked": False})
+    polygon = None
+    if marks.get("pitch_polygon"):
+        polygon = [[round(float(point[0]), 2), round(float(point[1]), 2)] for point in marks["pitch_polygon"]]
+    elif marks.get("pitch"):
         box = [float(value) for value in marks["pitch"]]
         pitch["box"] = [round(value, 2) for value in box]
+        polygon = box_to_polygon(pitch["box"])
+    if polygon and len(polygon) >= 3:
+        pitch["polygon"] = polygon
+        pitch["box"] = [round(value, 2) for value in _bounds(polygon)]
         pitch["source"] = "manual"
+        pitch["fixed"] = True
     stump_box = (geometry.get("stumps") or {}).get("box")
-    pitch_box = pitch.get("box")
     events_found = any(
         (row.get("contact") or {}).get("video_detected") or (row.get("ball_release") or {}).get("accepted")
         for row in result.get("deliveries") or []
     )
-    checked, did = recheck_pitch(pitch_box, width, height, events_found)
-    if did and checked is not None:
-        pitch["box"] = [round(value, 2) for value in checked]
+    if pitch.get("polygon") and not events_found and not _same_as_box(pitch["polygon"], pitch.get("box")):
+        grown = expand_polygon(pitch["polygon"], width, height, 0.15)
+        pitch["polygon"] = [[round(point[0], 2), round(point[1], 2)] for point in grown]
+        pitch["box"] = [round(value, 2) for value in _bounds(pitch["polygon"])]
         pitch["rechecked"] = True
-        pitch_box = pitch["box"]
+    else:
+        checked, did = recheck_pitch(pitch.get("box"), width, height, events_found or not pitch.get("box"))
+        if did and checked is not None:
+            pitch["box"] = [round(value, 2) for value in checked]
+            pitch["polygon"] = [[round(point[0], 2), round(point[1], 2)] for point in box_to_polygon(pitch["box"])]
+            pitch["rechecked"] = True
+    if pitch.get("polygon"):
+        geometry["roles"] = filter_roles_to_pitch(geometry.get("roles") or {}, pitch["polygon"])
+    pitch_area = pitch.get("polygon") or pitch.get("box")
     manual_release = marks.get("release_frame")
     manual_contact = marks.get("contact_frame")
     audio_present = bool((result.get("preanalysis") or {}).get("audio_present"))
@@ -380,6 +500,6 @@ def apply_marks(result: dict, marks: dict) -> dict:
             contact = delivery.setdefault("contact", {})
             contact["manual_frame"] = int(manual_contact)
             contact["manual_time_s"] = None if not video.get("fps") else round(int(manual_contact) / float(video["fps"]), 3)
-        attach_delivery_rules(delivery, stump_box, pitch_box, audio_present)
+        attach_delivery_rules(delivery, stump_box, pitch_area, audio_present)
     result["geometry"] = geometry
     return result

@@ -281,12 +281,17 @@ const drawError = document.querySelector("#draw-error");
 let drawMode = "stumps";
 let drawStart = null;
 let stumpBox = null;
-let pitchBox = null;
 let frameImage = null;
+const pitchEditor = createPitchEditor();
+let pitchSessionId = "";
 
 document.querySelector("#draw-stumps").addEventListener("click", () => { drawMode = "stumps"; });
 document.querySelector("#draw-pitch").addEventListener("click", () => { drawMode = "pitch"; });
-document.querySelector("#save-marks").addEventListener("click", saveMarks);
+document.querySelector("#complete-area").addEventListener("click", () => { pitchEditor.complete(); paintDraw(); });
+document.querySelector("#clear-pitch").addEventListener("click", () => { pitchEditor.clear(); paintDraw(); });
+document.querySelector("#delete-point").addEventListener("click", () => { pitchEditor.removeSelected(); paintDraw(); });
+document.querySelector("#save-marks").addEventListener("click", () => saveMarks(false));
+document.querySelector("#analyse-marks").addEventListener("click", () => saveMarks(true));
 
 function setupDrawing(result) {
   const stumps = result && result.geometry && result.geometry.stumps;
@@ -296,8 +301,13 @@ function setupDrawing(result) {
   }
   drawPanel.hidden = false;
   drawNote.textContent = stumps.manual_required
-    ? "The stumps were not locked in the first five frames. Draw a box on this first frame. It stays fixed for the whole clip. The pitch box is optional and marks a dead ball when the ball leaves it."
-    : "The stump box is fixed. Draw only if you want to replace it, or draw the pitch.";
+    ? "The stumps were not locked in the first five frames. Draw a box on this first frame. It stays fixed for the whole clip. Click to place the pitch polygon. Complete Area closes it. A ball outside that shape is a dead ball."
+    : "The stump box is fixed. Draw only if you want to replace it. Click to place pitch points, drag a point to move it, and right-click a point to remove it.";
+  if (pitchSessionId !== sessionIdEl.textContent) {
+    pitchSessionId = sessionIdEl.textContent;
+    const saved = result.geometry && result.geometry.pitch && result.geometry.pitch.polygon;
+    pitchEditor.load(saved);
+  }
   const image = new Image();
   image.onload = () => {
     frameImage = image;
@@ -317,23 +327,45 @@ function canvasPoint(event) {
 }
 
 drawCanvas.addEventListener("pointerdown", (event) => {
-  drawStart = canvasPoint(event);
+  const point = canvasPoint(event);
+  if (drawMode === "pitch") {
+    pitchEditor.pointerDown(point);
+    paintDraw();
+    return;
+  }
+  drawStart = point;
+});
+drawCanvas.addEventListener("pointermove", (event) => {
+  if (drawMode !== "pitch" || !pitchEditor.dragging) return;
+  pitchEditor.pointerMove(canvasPoint(event));
+  paintDraw();
 });
 drawCanvas.addEventListener("pointerup", (event) => {
+  if (drawMode === "pitch") {
+    pitchEditor.pointerUp();
+    return;
+  }
   if (!drawStart) return;
   const end = canvasPoint(event);
-  const box = [drawStart.x, drawStart.y, end.x, end.y];
-  if (drawMode === "pitch") pitchBox = box;
-  else stumpBox = box;
+  stumpBox = [drawStart.x, drawStart.y, end.x, end.y];
   drawStart = null;
   paintDraw();
+});
+drawCanvas.addEventListener("contextmenu", (event) => {
+  if (drawMode !== "pitch") return;
+  event.preventDefault();
+  const index = pitchEditor.hit(canvasPoint(event));
+  if (index >= 0) {
+    pitchEditor.removeAt(index);
+    paintDraw();
+  }
 });
 
 function paintDraw() {
   const context = drawCanvas.getContext("2d");
   context.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
   if (frameImage) context.drawImage(frameImage, 0, 0, drawCanvas.width, drawCanvas.height);
-  strokeBox(context, pitchBox, "#8fbf7f");
+  pitchEditor.paint(context);
   strokeBox(context, stumpBox, "#e0b15c");
 }
 
@@ -344,20 +376,30 @@ function strokeBox(context, box, color) {
   context.strokeRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
 }
 
-async function saveMarks() {
+async function saveMarks(rerun) {
   drawError.hidden = true;
   const body = {};
   if (stumpBox) body.stumps = stumpBox;
-  if (pitchBox) body.pitch = pitchBox;
+  if (pitchEditor.points.length >= 3) {
+    pitchEditor.complete();
+    body.pitch_polygon = pitchEditor.coordinates();
+    paintDraw();
+  } else if (pitchEditor.points.length) {
+    drawError.hidden = false;
+    drawError.textContent = "The pitch needs at least three points before it can close.";
+    return;
+  }
+  const path = rerun ? "analyse" : "marks";
   try {
-    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionIdEl.textContent)}/marks`, {
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionIdEl.textContent)}/${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.detail || "Could not save the boxes");
+    if (!response.ok) throw new Error(payload.detail || "Could not save the pitch");
     showSession(payload);
+    if (rerun && (payload.status === "queued" || payload.status === "running")) poll(payload.session_id);
   } catch (error) {
     drawError.hidden = false;
     drawError.textContent = error.message;

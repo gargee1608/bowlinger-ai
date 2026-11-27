@@ -137,10 +137,13 @@ The carry-based `virtual_runs` number above is unchanged. A separate outcome run
 - [x] Test: the lock ignores a later box; a missing detection asks for a drawing; both phone clips keep one fixed box. `sample_01` locked the near sticks at the bottom of the frame. `sample_02` locked a small box. One box is kept, not two wickets.
 
 ## GF – Pitch area and dead ball
-- [x] The user can draw a box around the pitch. It is the area for players, the ball, the bat, and bowling events. `POST /api/sessions/{id}/marks`.
+- [x] The user can draw a box around the pitch. It is the area for players, the ball, the bat, and bowling events. `POST /api/sessions/{id}/marks`. A rectangle is stored as a 4-point polygon.
 - [x] A ball that moves outside that box is a dead ball. A hit inside the box stays a hit. Tested with points, not with a pitch drawn on the phone clips.
 - [x] If bowling events are missing, expand the pitch once and look again.
 - [x] Test: a point outside the box is a dead ball; a found event does not expand the box. The phone clips had no pitch box, so nothing on them was called a dead ball.
+- [x] The pitch can be an irregular polygon. Clicks add points with no limit of four, lines join them, points can be dragged or removed, Complete Area closes the shape, and Clear and Redraw starts again. The closed shape is a transparent fill. The same controls are on the session drawing panel and on `/train`. The pages were checked for those buttons. The clicks themselves were not driven in a browser.
+- [x] The polygon is saved on the session and stays the fixed boundary until the user edits it. `POST /api/sessions/{id}/analyse` (the Analysis button) reruns analysis with the current stump box and that polygon. `tests/test_areas_and_pages.py`.
+- [x] Point-in-polygon decides whether the ball, the bat, and players are inside. A ball point outside the polygon is a dead ball, same as the rectangle rule. Ball tracking, contact, and `virtual_runs` are not otherwise changed. An L-shaped pitch marks the outside point as a dead ball and leaves `virtual_runs` at 4.
 
 ## GG – Who is who
 The cricket model classes are ball, bat, batsman, bowler, fielder, gloves, pads, stumps, and wicket-keeper. A class is used when the model has it. The rules below fill the rest.
@@ -217,6 +220,7 @@ Both files are portrait phone video of a practice net, with audio. They are not 
 - The stump lock keeps one box from the first five frames. On sample_01 that is the near yellow and blue sticks, low in the portrait frame. The far wicket is not a second locked box. The expanded area is that box grown by half its size on every side. Movement inside it is a sample of frame-difference times, not a tracked person.
 - A YouTube analysis was tested with a stand-in file. yt-dlp is installed, and a live YouTube download was not run here.
 - The training pages save boxes and hit/miss marks. They do not train a new `.pt`.
+- The pitch polygon was tested as geometry and through the session API. Placing, dragging, and deleting points was not clicked in a browser.
 - `models/cricket.pt` is a YOLO11n fine-tune (8 epochs, imgsz 960, CPU) of Roboflow Universe jignesh-workspace/cricket-object-detection-qnjwo v2, CC BY 4.0. Validation: mAP50 0.688, mAP50-95 0.496. Per class mAP50: ball 0.725, bat 0.636, batsman 0.825, bowler 0.877, stumps 0.617, stump-bails 0.000. The images are not in git. The phone clips are a different look from that set, so the ball and the far bat are still mostly missed.
 - Practice stumps in `sample_01` are yellow and blue. White-only detection counted floodlit specks, so a wicket now has to be two or three uprights seen for most of the clip. Wooden stumps on `sample_02` still fail.
 - Tracks that last longer than 2.5 s, crawl, or never reach a detected wicket are dropped. That removed the long false tracks. It does not create a real ball track.
