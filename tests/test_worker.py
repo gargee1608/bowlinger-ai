@@ -5,7 +5,16 @@ import time
 from fastapi.testclient import TestClient
 
 from bowlinger.api import create_app
-from bowlinger.db import create_job, get_job, get_session, init_db, insert_session, requeue_interrupted_jobs
+from bowlinger.db import (
+    create_job,
+    finish_job,
+    get_job,
+    get_session,
+    init_db,
+    insert_session,
+    requeue_interrupted_jobs,
+    surface_orphaned_session_failures,
+)
 from bowlinger.sessions import accept_video
 from bowlinger.synthetic import ClipSpec, write_clip
 
@@ -104,3 +113,26 @@ def test_a_job_left_running_is_claimed_again(settings):
     assert requeue_interrupted_jobs(settings.db_path) == 1
     assert get_job(settings.db_path, job_id)["status"] == "queued"
     assert get_session(settings.db_path, "stuck")["status"] == "queued"
+
+
+def test_a_failed_job_no_longer_leaves_the_session_queued(settings):
+    init_db(settings.db_path)
+    from bowlinger.db import ensure_user
+
+    ensure_user(settings.db_path, "coach_1")
+    insert_session(
+        settings.db_path,
+        session_id="quiet",
+        user_id="coach_1",
+        source="upload",
+        original_name="clip.mp4",
+        video_path="/tmp/missing.mp4",
+        video_bytes=1,
+    )
+    job_id = create_job(settings.db_path, "quiet")
+    finish_job(settings.db_path, job_id, "failed", error="worker exploded\ntraceback")
+    assert get_session(settings.db_path, "quiet")["status"] == "queued"
+    assert surface_orphaned_session_failures(settings.db_path) == 1
+    row = get_session(settings.db_path, "quiet")
+    assert row["status"] == "failed"
+    assert row["error"] == "worker exploded"

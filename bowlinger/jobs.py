@@ -24,6 +24,7 @@ from bowlinger.db import (
     get_session,
     requeue_interrupted_jobs,
     set_session_status,
+    surface_orphaned_session_failures,
 )
 
 logger = logging.getLogger("uvicorn.error")
@@ -55,6 +56,7 @@ class JobQueue:
         if self.sync or (self._thread is not None and self._thread.is_alive()):
             return
         requeue_interrupted_jobs(self.db_path)
+        surface_orphaned_session_failures(self.db_path)
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, name="bowlinger-jobs", daemon=True)
         self._thread.start()

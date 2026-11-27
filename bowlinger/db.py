@@ -122,6 +122,39 @@ def requeue_interrupted_jobs(db_path: Path) -> int:
         return cur.rowcount
 
 
+def surface_orphaned_session_failures(db_path: Path) -> int:
+    """A failed job used to leave its session at queued, which the page shows forever."""
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT s.id, j.error
+            FROM sessions s
+            JOIN jobs j ON j.session_id = s.id
+            WHERE s.status = 'queued'
+              AND j.status = 'failed'
+              AND NOT EXISTS (
+                SELECT 1 FROM jobs q
+                WHERE q.session_id = s.id AND q.status IN ('queued', 'running')
+              )
+            ORDER BY j.finished_at DESC
+            """
+        ).fetchall()
+        seen: set[str] = set()
+        updated = 0
+        now = utcnow()
+        for row in rows:
+            if row["id"] in seen:
+                continue
+            seen.add(row["id"])
+            error = ((row["error"] or "The analysis job failed.").splitlines() or ["The analysis job failed."])[0][:500]
+            cur = conn.execute(
+                "UPDATE sessions SET status = 'failed', error = ?, updated_at = ? WHERE id = ? AND status = 'queued'",
+                (error, now, row["id"]),
+            )
+            updated += cur.rowcount
+        return updated
+
+
 def finish_job(db_path: Path, job_id: str, status: str, error: str | None = None) -> None:
     with connect(db_path) as conn:
         conn.execute(
